@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Customers{% endblock %}
+{% block page_title %}Customer Database{% endblock %}
+
+{% block content %}
+
+<!-- Search & filter -->
+<div class="card" style="padding:16px 20px;margin-bottom:16px;">
+  <form method="GET" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+    <div style="flex:1;min-width:200px;">
+      <label class="input-label">Search</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="Name or phone…" class="input">
+    </div>
+    <div style="width:150px;">
+      <label class="input-label">Filter</label>
+      <select name="filter" class="input">
+        <option value="">All customers</option>
+        <option value="active" {% if filter_opt=='active' %}selected{% endif %}>Active only</option>
+        <option value="opted_out" {% if filter_opt=='opted_out' %}selected{% endif %}>Opted out</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">🔍 Search</button>
+    {% if q or filter_opt %}
+    <a href="{{ url_for('customers') }}" class="btn btn-ghost">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 2px;">
+  <div style="font-size:13px;color:var(--muted);">
+    <strong style="color:#ccc;">{{ total }}</strong> customers total
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Phone</th>
+          <th>Last Route</th>
+          <th>Platform</th>
+          <th>Total Msgs</th>
+          <th>Last Messaged</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in customers %}
+        <tr>
+          <td style="font-weight:500;color:#e0e0e0;">{{ c.name or '—' }}</td>
+          <td style="font-family:monospace;font-size:12px;color:#888;">{{ c.phone }}</td>
+          <td style="font-size:12.5px;">{{ c.last_route or '—' }}</td>
+          <td style="font-size:12.5px;">{{ c.last_platform or '—' }}</td>
+          <td style="text-align:center;font-weight:600;color:var(--amber);">{{ c.total_messages }}</td>
+          <td style="font-size:12px;color:var(--muted);">{{ c.last_messaged_at[:10] if c.last_messaged_at else '—' }}</td>
+          <td>
+            {% if c.opted_out %}
+            <span class="status-dot badge-failed">✗ Opted out</span>
+            {% else %}
+            <span class="status-dot badge-sent">✓ Active</span>
+            {% endif %}
+          </td>
+          <td>
+            <form method="POST" action="{{ url_for('customer_toggle', phone=c.phone) }}" style="display:inline;">
+              {% if c.opted_out %}
+              <input type="hidden" name="opted_out" value="0">
+              <button type="submit" class="btn btn-success btn-sm">Restore</button>
+              {% else %}
+              <input type="hidden" name="opted_out" value="1">
+              <button type="submit" class="btn btn-danger btn-sm">Opt out</button>
+              {% endif %}
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" style="text-align:center;color:var(--muted);padding:40px;">
+            No customers yet — they'll appear here after first send.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if total_pages > 1 %}
+<div style="display:flex;justify-content:center;margin-top:20px;">
+  <div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page-1 }}&q={{ q }}&filter={{ filter_opt }}" class="page-btn">← Prev</a>
+    {% endif %}
+    {% for p in range([1, page-2]|max, [total_pages, page+2]|min + 1) %}
+    <a href="?page={{ p }}&q={{ q }}&filter={{ filter_opt }}" class="page-btn {{ 'active' if p==page else '' }}">{{ p }}</a>
+    {% endfor %}
+    {% if page < total_pages %}
+    <a href="?page={{ page+1 }}&q={{ q }}&filter={{ filter_opt }}" class="page-btn">Next →</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

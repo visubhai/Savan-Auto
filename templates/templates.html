@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Templates{% endblock %}
+{% block page_title %}Message Templates{% endblock %}
+{% block topbar_actions %}
+  {% if api_configured %}
+  <form method="POST" action="{{ url_for('templates_sync') }}" style="display:inline;">
+    <button type="submit" class="btn btn-ghost btn-sm">🔄 Sync from Meta</button>
+  </form>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+
+{% if not api_configured %}
+<div class="flash flash-error">
+  <span>⚠</span> API not configured — <a href="{{ url_for('settings') }}" style="color:#fca5a5;text-decoration:underline;">add your token</a> to sync templates from Meta.
+</div>
+{% endif %}
+
+<div style="display:grid;gap:12px;">
+  {% for t in templates %}
+  <div class="card" style="padding:22px;">
+    <div style="display:flex;align-items:flex-start;gap:16px;">
+      <div style="flex:1;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+          <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;">{{ t.name }}</div>
+          <span class="status-dot badge-{{ t.status }}">{{ t.status }}</span>
+          <span class="status-dot badge-{{ t.category|lower }}">{{ t.category }}</span>
+          <span style="font-size:11px;color:var(--muted);">{{ t.language }}</span>
+          {% if t.is_default %}
+          <span style="background:var(--amber-dim);color:var(--amber);font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;">DEFAULT</span>
+          {% endif %}
+        </div>
+
+        <!-- Template body preview -->
+        <div class="card2" style="padding:14px;margin-bottom:12px;">
+          <pre style="font-family:'DM Sans',sans-serif;font-size:13px;color:#bbb;white-space:pre-wrap;line-height:1.65;margin:0;">{{ t.body }}</pre>
+        </div>
+
+        <div style="font-size:12px;color:var(--muted);">
+          {{ t.variable_count }} variable{{ 's' if t.variable_count != 1 else '' }}
+          {% if t.synced_at %} · Synced: {{ t.synced_at[:10] }}{% endif %}
+          · Created: {{ t.created_at[:10] }}
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;flex-shrink:0;">
+        {% if not t.is_default %}
+        <form method="POST" action="{{ url_for('templates_set_default', name=t.name) }}">
+          <button type="submit" class="btn btn-ghost btn-sm" style="width:100%;">⭐ Set Default</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="card" style="padding:40px;text-align:center;">
+    <div style="font-size:32px;margin-bottom:12px;">📝</div>
+    <div style="font-size:16px;font-weight:600;color:#ccc;margin-bottom:6px;">No templates yet</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px;">Configure your API and click "Sync from Meta" to import approved templates.</div>
+    <a href="{{ url_for('settings') }}" class="btn btn-primary">⚙ Go to Settings</a>
+  </div>
+  {% endfor %}
+</div>
+
+{% endblock %}

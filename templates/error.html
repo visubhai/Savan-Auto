@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} Error{% endblock %}
+{% block page_title %}Error {{ code }}{% endblock %}
+{% block content %}
+<div style="text-align:center;padding:60px 20px;">
+  <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:72px;font-weight:800;color:rgba(255,255,255,0.05);margin-bottom:-20px;">{{ code }}</div>
+  <div style="font-size:18px;font-weight:600;color:#ccc;margin-bottom:8px;">{{ message }}</div>
+  <div style="font-size:13px;color:var(--muted);margin-bottom:24px;">Something didn't go as planned.</div>
+  <a href="{{ url_for('dashboard') }}" class="btn btn-primary">← Back to Dashboard</a>
+</div>
+{% endblock %}

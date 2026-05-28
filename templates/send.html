@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Send Messages{% endblock %}
+{% block page_title %}Send Messages{% endblock %}
+
+{% block content %}
+<div style="max-width:680px;">
+
+  <div class="card" style="padding:28px;">
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:20px;font-weight:700;margin-bottom:4px;">Upload Passenger CSV</div>
+    <div style="font-size:13.5px;color:var(--muted);margin-bottom:24px;">Upload reports from RedBus, AbhiBus, MakeMyTrip, Paytm or any platform. Multiple files supported.</div>
+
+    <form method="POST" enctype="multipart/form-data" id="uploadForm">
+
+      {# File input is OUTSIDE the drop-zone so base.html's zone click handler ignores it #}
+      <input type="file" name="csv_file" id="csvFile" accept=".csv,.txt,.tsv" multiple style="display:none;">
+
+      <!-- Drop zone (drag & drop only — no accidental click-to-open) -->
+      <div class="drop-zone" id="dropZone" style="margin-bottom:20px;cursor:default;">
+
+        <!-- Empty state -->
+        <div id="dropContent" style="padding:8px 0;">
+          <div style="font-size:36px;margin-bottom:10px;">📂</div>
+          <div style="font-size:15px;font-weight:600;color:#ccc;margin-bottom:4px;">Drag &amp; drop CSV files here</div>
+          <div style="font-size:12.5px;color:var(--muted);margin-bottom:18px;">.csv, .txt, .tsv · multiple files OK</div>
+          <button type="button" id="chooseBtnEmpty" class="btn btn-ghost" style="margin:0 auto;cursor:pointer;">
+            📁 Choose Files
+          </button>
+        </div>
+
+        <!-- Files selected state -->
+        <div id="fileSelected" style="display:none;text-align:left;padding:4px 0;">
+          <div id="fileList" style="margin-bottom:12px;max-height:160px;overflow-y:auto;"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button type="button" id="addMoreBtn" class="btn btn-ghost btn-sm" style="cursor:pointer;">➕ Add More Files</button>
+            <button type="button" id="clearAllBtn" class="btn btn-ghost btn-sm" style="color:#666;cursor:pointer;">✕ Clear All</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Supported formats -->
+      <div class="card2" style="padding:14px;margin-bottom:22px;">
+        <div style="font-size:11px;font-weight:600;color:#aaa;margin-bottom:10px;letter-spacing:0.05em;text-transform:uppercase;">Supported CSV Formats</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12.5px;color:#888;">
+          <div>✅ RedBus Agent Report</div>
+          <div>✅ AbhiBus Export</div>
+          <div>✅ MakeMyTrip / Goibibo</div>
+          <div>✅ Paytm / EaseMyTrip</div>
+          <div>✅ Custom CSV (phone, name…)</div>
+          <div>✅ Any CSV with phone column</div>
+        </div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:#666;">
+          ⚠ Excel (.xlsx) not supported — export as CSV first
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;font-size:15px;padding:13px;" id="uploadBtn" disabled>
+        <span>📊</span> <span id="uploadBtnText">Select a file first</span>
+      </button>
+    </form>
+  </div>
+
+  <!-- Tips row -->
+  <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div class="card2" style="padding:16px;">
+      <div style="font-size:13px;font-weight:600;color:#ccc;margin-bottom:8px;">✨ Auto-handled for you</div>
+      <ul style="font-size:12.5px;color:#777;line-height:2.2;list-style:none;padding:0;margin:0;">
+        <li>🗑 Cancelled bookings removed</li>
+        <li>🔁 Duplicate phones merged</li>
+        <li>🚫 Opted-out customers skipped</li>
+        <li>📱 Phone numbers normalised to +91</li>
+        <li>✏️ Names properly capitalised</li>
+      </ul>
+    </div>
+    <div class="card2" style="padding:16px;">
+      <div style="font-size:13px;font-weight:600;color:#ccc;margin-bottom:8px;">💰 Your Cost vs Wapsolution</div>
+      <ul style="font-size:12.5px;color:#777;line-height:2.2;list-style:none;padding:0;margin:0;">
+        <li>💚 Your cost: ₹0.12/message</li>
+        <li>❌ Wapsolution: ₹2000/month fixed</li>
+        <li>📉 Break-even: 16,667 msgs/month</li>
+        <li>💵 At 3000/month: Save ₹1,640</li>
+        <li>🎯 At 100/day: Save ~₹1,900/month</li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var fileInput     = document.getElementById('csvFile');
+  var dropZone      = document.getElementById('dropZone');
+  var uploadBtn     = document.getElementById('uploadBtn');
+  var uploadBtnText = document.getElementById('uploadBtnText');
+  var dropContent   = document.getElementById('dropContent');
+  var fileSelected  = document.getElementById('fileSelected');
+  var fileList      = document.getElementById('fileList');
+
+  // Store is a plain array of File objects — simpler than DataTransfer manipulation
+  var store = [];
+
+  /* ── Render UI from store ── */
+  function render() {
+    if (store.length === 0) {
+      dropContent.style.display = 'block';
+      fileSelected.style.display = 'none';
+      uploadBtn.disabled = true;
+      uploadBtnText.textContent = 'Select a file first';
+      fileInput.value = ''; // allow re-selecting same file next time
+      return;
+    }
+
+    var totalKB = store.reduce(function(s, f) { return s + f.size; }, 0) / 1024;
+    fileList.innerHTML = store.map(function(f, i) {
+      return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;margin-bottom:4px;'
+           + 'background:#141414;border:1px solid var(--border);border-radius:7px;">'
+           + '<span style="font-size:14px;">📄</span>'
+           + '<span style="flex:1;font-size:12.5px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + f.name + '</span>'
+           + '<span style="font-size:11px;color:#555;flex-shrink:0;">' + (f.size/1024).toFixed(0) + ' KB</span>'
+           + '<button type="button" data-idx="' + i + '" style="background:none;border:none;color:#555;'
+           + 'cursor:pointer;font-size:15px;line-height:1;padding:0 2px;flex-shrink:0;" title="Remove">✕</button>'
+           + '</div>';
+    }).join('');
+
+    dropContent.style.display = 'none';
+    fileSelected.style.display = 'block';
+    uploadBtn.disabled = false;
+    uploadBtnText.textContent = store.length === 1
+      ? 'Analyse "' + store[0].name + '"'
+      : 'Analyse ' + store.length + ' Files  (' + totalKB.toFixed(0) + ' KB total)';
+  }
+
+  /* ── Add files (dedup by name) ── */
+  function addFiles(fileList) {
+    var existing = {};
+    store.forEach(function(f) { existing[f.name] = true; });
+    Array.from(fileList).forEach(function(f) {
+      if (!existing[f.name]) { store.push(f); existing[f.name] = true; }
+    });
+    render();
+  }
+
+  /* ── Remove one file ── */
+  document.getElementById('fileList').addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-idx]');
+    if (!btn) return;
+    store.splice(parseInt(btn.dataset.idx, 10), 1);
+    render();
+  });
+
+  /* ── File input change — capture snapshot immediately ── */
+  fileInput.addEventListener('change', function() {
+    var snapshot = Array.from(this.files);
+    if (snapshot.length) addFiles(snapshot);
+    // No value reset here — render() clears fileInput.value when store empties,
+    // which is the only case where re-selecting the same file matters
+  });
+
+  /* ── Buttons ── */
+  document.getElementById('chooseBtnEmpty').addEventListener('click', function(e) {
+    e.stopPropagation(); fileInput.click();
+  });
+  document.getElementById('addMoreBtn').addEventListener('click', function(e) {
+    e.stopPropagation(); fileInput.click();
+  });
+  document.getElementById('clearAllBtn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    store = [];
+    render();
+  });
+
+  /* ── Drag & drop ── */
+  dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  }, true);
+
+  /* ── Submit ── */
+  document.getElementById('uploadForm').addEventListener('submit', function(e) {
+    if (!store.length) { e.preventDefault(); return; }
+
+    // Inject all stored files into the file input right before the browser reads the form
+    var dt = new DataTransfer();
+    store.forEach(function(f) { dt.items.add(f); });
+    fileInput.files = dt.files;
+
+    uploadBtn.disabled = true;
+    uploadBtnText.textContent = store.length > 1
+      ? 'Analysing ' + store.length + ' files…'
+      : 'Analysing CSV…';
+    // Let the native form submit proceed — no e.preventDefault()
+  });
+})();
+</script>
+{% endblock %}

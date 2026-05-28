@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Savan Travels{% endblock %} — WhatsApp Sender</title>
+
+  <!-- Fonts: Bricolage Grotesque (headings) + DM Sans (body) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Bricolage Grotesque', 'sans-serif'],
+            body: ['DM Sans', 'sans-serif'],
+          },
+          colors: {
+            amber: { 400:'#fbbf24', 500:'#f59e0b', 600:'#d97706' },
+            dark: { 50:'#fafafa', 100:'#f4f4f5', 900:'#111111', 800:'#1a1a1a', 700:'#242424', 600:'#2e2e2e', 500:'#3a3a3a' },
+          },
+        }
+      }
+    }
+  </script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0e0e0e;
+      --card: #181818;
+      --card2: #1f1f1f;
+      --border: rgba(255,255,255,0.07);
+      --amber: #f59e0b;
+      --amber-dim: rgba(245,158,11,0.12);
+      --text: #f0f0f0;
+      --muted: #777;
+      --success: #22c55e;
+      --error: #ef4444;
+      --info: #3b82f6;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1,h2,h3,h4 { font-family: 'Bricolage Grotesque', sans-serif; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+    /* Sidebar nav */
+    .sidebar { width: 220px; min-height: 100vh; background: var(--card); border-right: 1px solid var(--border); position: fixed; left: 0; top: 0; z-index: 40; display: flex; flex-direction: column; }
+    .sidebar-logo { padding: 24px 20px 16px; border-bottom: 1px solid var(--border); }
+    .sidebar-logo .logo-icon { width: 36px; height: 36px; background: var(--amber); border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 10px; }
+    .sidebar-logo .logo-name { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 15px; color: #fff; line-height: 1.2; }
+    .sidebar-logo .logo-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .nav-section { padding: 12px 12px 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; margin: 1px 8px; border-radius: 8px; color: #888; font-size: 13.5px; font-weight: 500; text-decoration: none; transition: all 0.15s; cursor: pointer; }
+    .nav-item:hover { background: rgba(255,255,255,0.05); color: #ddd; }
+    .nav-item.active { background: var(--amber-dim); color: var(--amber); }
+    .nav-item .nav-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+    .nav-item .badge { margin-left: auto; background: var(--amber); color: #000; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 99px; }
+    .sidebar-footer { margin-top: auto; padding: 12px; border-top: 1px solid var(--border); }
+
+    /* Main content */
+    .main { margin-left: 220px; min-height: 100vh; }
+    .topbar { height: 56px; border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 28px; gap: 12px; position: sticky; top: 0; background: rgba(14,14,14,0.9); backdrop-filter: blur(12px); z-index: 30; }
+    .page-content { padding: 28px; }
+
+    /* Cards */
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+    .card2 { background: var(--card2); border: 1px solid var(--border); border-radius: 10px; }
+    .stat-card { padding: 20px 22px; position: relative; overflow: hidden; }
+    .stat-card::before { content: ''; position: absolute; top: -40%; right: -20%; width: 120px; height: 120px; background: var(--amber); opacity: 0.04; border-radius: 50%; }
+
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 8px; font-size: 13.5px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; text-decoration: none; white-space: nowrap; }
+    .btn-primary { background: var(--amber); color: #000; font-weight: 600; }
+    .btn-primary:hover { background: #fbbf24; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(245,158,11,0.3); }
+    .btn-ghost { background: transparent; color: #888; border: 1px solid var(--border); }
+    .btn-ghost:hover { background: rgba(255,255,255,0.05); color: #ccc; }
+    .btn-danger { background: rgba(239,68,68,0.12); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
+    .btn-danger:hover { background: rgba(239,68,68,0.2); }
+    .btn-success { background: rgba(34,197,94,0.12); color: #22c55e; border: 1px solid rgba(34,197,94,0.2); }
+    .btn-success:hover { background: rgba(34,197,94,0.2); }
+    .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+    /* Form inputs */
+    .input { width: 100%; background: var(--card2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 13px; color: var(--text); font-size: 13.5px; font-family: 'DM Sans', sans-serif; transition: border-color 0.15s; outline: none; }
+    .input:focus { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(245,158,11,0.1); }
+    .input::placeholder { color: var(--muted); }
+    .input-label { display: block; font-size: 12px; font-weight: 600; color: #aaa; margin-bottom: 6px; letter-spacing: 0.03em; }
+    select.input { cursor: pointer; }
+
+    /* Status badges */
+    .badge-sent { background: rgba(34,197,94,0.12); color: #22c55e; }
+    .badge-failed { background: rgba(239,68,68,0.12); color: #ef4444; }
+    .badge-pending { background: rgba(245,158,11,0.12); color: var(--amber); }
+    .badge-running { background: rgba(59,130,246,0.12); color: #60a5fa; }
+    .badge-completed { background: rgba(34,197,94,0.12); color: #22c55e; }
+    .badge-approved { background: rgba(34,197,94,0.12); color: #22c55e; }
+    .badge-rejected { background: rgba(239,68,68,0.12); color: #ef4444; }
+    .badge-utility { background: rgba(139,92,246,0.12); color: #a78bfa; }
+    .badge-marketing { background: rgba(59,130,246,0.12); color: #60a5fa; }
+    .status-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 9px; border-radius: 99px; font-weight: 500; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th { text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); }
+    tbody tr { border-bottom: 1px solid rgba(255,255,255,0.03); transition: background 0.1s; }
+    tbody tr:hover { background: rgba(255,255,255,0.02); }
+    tbody td { padding: 11px 14px; color: #ccc; vertical-align: middle; }
+    tbody tr:last-child { border-bottom: none; }
+
+    /* Flash messages */
+    .flash { padding: 12px 16px; border-radius: 8px; font-size: 13.5px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+    .flash-success { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.2); color: #4ade80; }
+    .flash-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); color: #f87171; }
+    .flash-info { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); color: #93c5fd; }
+
+    /* Progress bar */
+    .progress-track { background: rgba(255,255,255,0.07); border-radius: 99px; height: 8px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, var(--amber), #fbbf24); border-radius: 99px; transition: width 0.4s ease; }
+
+    /* Animations */
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .fade-in { animation: fadeIn 0.3s ease both; }
+    .pulse { animation: pulse 2s infinite; }
+    .spin { animation: spin 1s linear infinite; }
+
+    /* Drag-drop zone */
+    .drop-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 40px; text-align: center; transition: all 0.2s; cursor: pointer; }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: var(--amber); background: var(--amber-dim); }
+    .drop-zone input[type=file] { position: absolute; opacity: 0; width: 0; height: 0; }
+
+    /* Tooltip */
+    [data-tip] { position: relative; }
+    [data-tip]:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #333; color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 5px; white-space: nowrap; z-index: 100; pointer-events: none; }
+
+    /* Live log */
+    .live-log { background: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: 'Courier New', monospace; font-size: 12px; max-height: 280px; overflow-y: auto; }
+    .log-line { padding: 2px 0; color: #888; }
+    .log-sent { color: #4ade80; }
+    .log-failed { color: #f87171; }
+
+    /* Pagination */
+    .pagination { display: flex; gap: 4px; align-items: center; }
+    .page-btn { padding: 5px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; background: var(--card2); border: 1px solid var(--border); color: #888; text-decoration: none; transition: all 0.15s; }
+    .page-btn:hover { border-color: var(--amber); color: var(--amber); }
+    .page-btn.active { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
+
+    /* Divider */
+    .divider { height: 1px; background: var(--border); margin: 20px 0; }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">🚌</div>
+    <div class="logo-name">{{ business_name }}</div>
+    <div class="logo-sub">WhatsApp Sender</div>
+  </div>
+
+  <div style="flex:1; overflow-y:auto; padding-top:8px;">
+    <div class="nav-section">Main</div>
+    <a href="{{ url_for('dashboard') }}" class="nav-item {% if request.endpoint=='dashboard' %}active{% endif %}">
+      <span class="nav-icon">📊</span> Dashboard
+    </a>
+    <a href="{{ url_for('send') }}" class="nav-item {% if request.endpoint in ['send','send_preview','send_progress','send_start'] %}active{% endif %}">
+      <span class="nav-icon">📤</span> Send Messages
+    </a>
+    <a href="{{ url_for('scheduled') }}" class="nav-item {% if request.endpoint=='scheduled' %}active{% endif %}">
+      <span class="nav-icon">⏰</span> Scheduled
+    </a>
+    <a href="{{ url_for('inbox') }}" class="nav-item {% if request.endpoint in ['inbox','inbox_send','inbox_poll'] %}active{% endif %}" id="inboxNavItem">
+      <span class="nav-icon">💬</span> Inbox
+      <span class="badge" id="inboxBadge" style="display:none;">0</span>
+    </a>
+
+    <div class="nav-section">Data</div>
+    <a href="{{ url_for('history') }}" class="nav-item {% if request.endpoint=='history' %}active{% endif %}">
+      <span class="nav-icon">📋</span> History
+    </a>
+    <a href="{{ url_for('batches') }}" class="nav-item {% if request.endpoint=='batches' %}active{% endif %}">
+      <span class="nav-icon">📦</span> Batches
+    </a>
+    <a href="{{ url_for('customers') }}" class="nav-item {% if request.endpoint=='customers' %}active{% endif %}">
+      <span class="nav-icon">👥</span> Customers
+    </a>
+
+    <div class="nav-section">Config</div>
+    <a href="{{ url_for('templates_page') }}" class="nav-item {% if request.endpoint=='templates_page' %}active{% endif %}">
+      <span class="nav-icon">📝</span> Templates
+    </a>
+    <a href="{{ url_for('settings') }}" class="nav-item {% if request.endpoint=='settings' %}active{% endif %}">
+      <span class="nav-icon">⚙️</span> Settings
+    </a>
+    {% if current_user and current_user.role == 'admin' %}
+    <a href="{{ url_for('users') }}" class="nav-item {% if request.endpoint=='users' %}active{% endif %}">
+      <span class="nav-icon">🔐</span> Team
+    </a>
+    {% endif %}
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="nav-item" style="padding:8px 10px;">
+      <div style="width:28px;height:28px;background:var(--amber-dim);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;">
+        {{ (current_user.display_name[0] if current_user else '?').upper() }}
+      </div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;font-weight:600;color:#ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ current_user.display_name if current_user else '' }}</div>
+        <div style="font-size:10px;color:var(--muted);">{{ current_user.role if current_user else '' }}</div>
+      </div>
+      <a href="{{ url_for('logout') }}" data-tip="Logout" style="color:var(--muted);font-size:14px;flex-shrink:0;">⬡</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Main -->
+<div class="main">
+  <div class="topbar">
+    <div style="flex:1; font-family:'Bricolage Grotesque',sans-serif; font-weight:700; font-size:17px; color:#fff;">
+      {% block page_title %}{% endblock %}
+    </div>
+    {% block topbar_actions %}{% endblock %}
+  </div>
+
+  <div class="page-content fade-in">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="flash flash-{{ 'error' if cat=='error' else ('info' if cat=='info' else 'success') }}">
+          <span>{{ '✓' if cat=='success' else ('✗' if cat=='error' else 'ℹ') }}</span> {{ msg }}
+        </div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </div>
+</div>
+
+<script>
+// Toast helper
+function toast(msg, type='success') {
+  const t = document.createElement('div');
+  t.className = `flash flash-${type}`;
+  t.style.cssText = 'position:fixed;top:20px;right:20px;z-index:999;min-width:280px;animation:fadeIn 0.3s ease;';
+  t.innerHTML = `<span>${type==='success'?'✓':'✗'}</span> ${msg}`;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 3500);
+}
+
+// Drag and drop
+document.querySelectorAll('.drop-zone').forEach(zone => {
+  const inp = zone.querySelector('input[type=file]') || zone.closest('form')?.querySelector('input[type=file]');
+  zone.addEventListener('click', () => inp && inp.click());
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    if (inp && e.dataTransfer.files.length) {
+      inp.files = e.dataTransfer.files;
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+});
+</script>
+{% block scripts %}{% endblock %}
+<script>
+// Poll for unread inbox messages every 8 seconds (shown as badge in sidebar)
+(function() {
+  var badge = document.getElementById('inboxBadge');
+  if (!badge) return;
+  function pollUnread() {
+    fetch('/api/inbox/unread').then(function(r){ return r.json(); }).then(function(d) {
+      var n = d.count || 0;
+      badge.textContent = n > 99 ? '99+' : n;
+      badge.style.display = n > 0 ? '' : 'none';
+    }).catch(function(){});
+  }
+  pollUnread();
+  setInterval(pollUnread, 8000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block title %}Inbox{% endblock %}
+{% block page_title %}Inbox{% endblock %}
+
+{% block content %}
+<style>
+  .inbox-wrap { display:flex; gap:0; height:calc(100vh - 120px); min-height:500px; }
+
+  /* ── Conversation list ── */
+  .conv-list { width:300px; flex-shrink:0; border:1px solid var(--border); border-radius:12px 0 0 12px; overflow-y:auto; background:var(--card); }
+  .conv-search { padding:12px; border-bottom:1px solid var(--border); }
+  .conv-search input { width:100%; background:#111; border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:#ccc; font-size:13px; outline:none; }
+  .conv-search input:focus { border-color:var(--amber); }
+  .conv-item { display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; border-bottom:1px solid var(--border); transition:background .12s; text-decoration:none; color:inherit; }
+  .conv-item:hover { background:rgba(255,255,255,.04); }
+  .conv-item.active { background:var(--amber-dim); }
+  .conv-avatar { width:38px; height:38px; border-radius:50%; background:#2a2a2a; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
+  .conv-meta { flex:1; min-width:0; }
+  .conv-name { font-size:13.5px; font-weight:600; color:#ddd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .conv-preview { font-size:12px; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .conv-right { text-align:right; flex-shrink:0; }
+  .conv-time { font-size:11px; color:#555; }
+  .conv-badge { display:inline-block; background:var(--amber); color:#000; font-size:10px; font-weight:700; padding:1px 6px; border-radius:99px; margin-top:4px; }
+  .conv-empty { padding:40px 20px; text-align:center; color:#555; font-size:13px; }
+
+  /* ── Chat window ── */
+  .chat-wrap { flex:1; display:flex; flex-direction:column; border:1px solid var(--border); border-left:none; border-radius:0 12px 12px 0; overflow:hidden; background:#0e0e0e; }
+  .chat-header { padding:14px 18px; border-bottom:1px solid var(--border); background:var(--card); display:flex; align-items:center; gap:12px; }
+  .chat-title { font-weight:700; font-size:15px; color:#ddd; }
+  .chat-phone { font-size:12px; color:#666; margin-top:1px; }
+  .window-badge { font-size:11px; padding:3px 10px; border-radius:99px; font-weight:600; }
+  .window-open { background:#1a3a1a; color:#4caf50; }
+  .window-closed { background:#3a1a1a; color:#f44336; }
+
+  .chat-messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
+  .msg-row { display:flex; }
+  .msg-row.out { justify-content:flex-end; }
+  .msg-row.in  { justify-content:flex-start; }
+  .bubble { max-width:72%; padding:9px 13px; border-radius:14px; font-size:13.5px; line-height:1.5; word-break:break-word; position:relative; }
+  .msg-row.out .bubble { background:#2a4a1a; color:#d4f0a0; border-bottom-right-radius:4px; }
+  .msg-row.in  .bubble { background:#1e1e1e; color:#ddd; border-bottom-left-radius:4px; border:1px solid var(--border); }
+  .bubble-time { font-size:10px; opacity:.5; margin-top:4px; display:block; text-align:right; }
+  .bubble-status { font-size:10px; opacity:.6; }
+  .msg-date-sep { text-align:center; color:#444; font-size:11px; margin:8px 0; }
+
+  .chat-placeholder { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#333; }
+  .chat-placeholder div { font-size:48px; margin-bottom:12px; }
+  .chat-placeholder p { font-size:14px; }
+
+  /* ── Input bar ── */
+  .chat-input-bar { padding:12px 14px; border-top:1px solid var(--border); background:var(--card); display:flex; gap:10px; align-items:flex-end; }
+  .chat-input-bar textarea { flex:1; background:#111; border:1px solid var(--border); border-radius:10px; padding:10px 14px; color:#ccc; font-size:13.5px; resize:none; outline:none; font-family:inherit; max-height:120px; line-height:1.5; }
+  .chat-input-bar textarea:focus { border-color:var(--amber); }
+  .send-btn { background:var(--amber); color:#000; border:none; border-radius:10px; padding:10px 18px; font-weight:700; font-size:14px; cursor:pointer; flex-shrink:0; }
+  .send-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .window-warn { padding:8px 14px; background:#2a1800; border-top:1px solid #4a2800; font-size:12px; color:#f0a040; text-align:center; }
+</style>
+
+<div class="inbox-wrap">
+
+  <!-- ── Conversation list ── -->
+  <div class="conv-list">
+    <div class="conv-search">
+      <input type="text" id="convSearch" placeholder="Search conversations…" oninput="filterConvs(this.value)">
+    </div>
+
+    <div id="convListBody">
+      {% if conversations %}
+        {% for c in conversations %}
+        <a href="{{ url_for('inbox') }}?phone={{ c.phone }}"
+           class="conv-item {% if c.phone == active_phone %}active{% endif %}"
+           data-name="{{ (c.customer_name or c.phone)|lower }}"
+           data-phone="{{ c.phone|lower }}">
+          <div class="conv-avatar">👤</div>
+          <div class="conv-meta">
+            <div class="conv-name">{{ c.customer_name or c.phone }}</div>
+            <div class="conv-preview">
+              {% if c.direction == 'out' %}↗ {% endif %}
+              {{ c.content[:45] }}{% if c.content|length > 45 %}…{% endif %}
+            </div>
+          </div>
+          <div class="conv-right">
+            <div class="conv-time">{{ c.timestamp[11:16] if c.timestamp else '' }}</div>
+            {% if c.unread and c.unread > 0 %}
+              <div class="conv-badge">{{ c.unread }}</div>
+            {% endif %}
+          </div>
+        </a>
+        {% endfor %}
+      {% else %}
+        <div class="conv-empty">
+          No conversations yet.<br>Messages from customers will appear here.
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── Chat window ── -->
+  <div class="chat-wrap" id="chatWrap">
+    {% if active_phone %}
+
+      <!-- Header -->
+      <div class="chat-header">
+        <div>
+          <div class="chat-title">{{ customer_name or active_phone }}</div>
+          <div class="chat-phone">+{{ active_phone }}</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+          <span class="window-badge" id="windowBadge">Checking…</span>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="chat-messages" id="chatMessages">
+        {% set ns = namespace(last_date='') %}
+        {% for m in messages %}
+          {% set day = m.timestamp[:10] if m.timestamp else '' %}
+          {% if day != ns.last_date %}
+            <div class="msg-date-sep">── {{ day }} ──</div>
+            {% set ns.last_date = day %}
+          {% endif %}
+          <div class="msg-row {{ m.direction }}" data-id="{{ m.id }}">
+            <div class="bubble">
+              {{ m.content }}
+              <span class="bubble-time">
+                {{ m.timestamp[11:16] if m.timestamp else '' }}
+                {% if m.direction == 'out' %}
+                  &nbsp;{% if m.status == 'read' %}✓✓{% elif m.status == 'delivered' %}✓✓{% elif m.status == 'sent' %}✓{% else %}⏳{% endif %}
+                {% endif %}
+              </span>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <!-- 24h window warning -->
+      <div class="window-warn" id="windowWarn" style="display:none;">
+        ⚠ 24-hour window closed — customer hasn't messaged in over 24 hours. Use a template message instead.
+      </div>
+
+      <!-- Input bar -->
+      <div class="chat-input-bar">
+        <textarea id="msgInput" rows="1" placeholder="Type a message…"
+          onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send ➤</button>
+      </div>
+
+    {% else %}
+      <div class="chat-placeholder">
+        <div>💬</div>
+        <p>Select a conversation to start chatting</p>
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var ACTIVE_PHONE = {{ (active_phone or '')|tojson }};
+var lastMsgId    = {{ (messages[-1].id if messages else 0) }};
+var pollTimer    = null;
+
+/* ── Scroll to bottom ── */
+function scrollBottom() {
+  var el = document.getElementById('chatMessages');
+  if (el) el.scrollTop = el.scrollHeight;
+}
+scrollBottom();
+
+/* ── Check 24h window ── */
+function checkWindow() {
+  if (!ACTIVE_PHONE) return;
+  var msgs = document.querySelectorAll('#chatMessages .msg-row.in');
+  var badge = document.getElementById('windowBadge');
+  var warn  = document.getElementById('windowWarn');
+  var input = document.getElementById('msgInput');
+  var btn   = document.getElementById('sendBtn');
+
+  if (msgs.length === 0) {
+    // No incoming messages yet — window is closed
+    setWindowClosed(badge, warn, input, btn);
+    return;
+  }
+  // Get timestamp of last incoming message from DOM (we track via server poll)
+  fetch('/api/inbox/messages?phone=' + ACTIVE_PHONE + '&after=0')
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      var inMsgs = data.filter(function(m){ return m.direction === 'in'; });
+      if (inMsgs.length === 0) { setWindowClosed(badge, warn, input, btn); return; }
+      var last = inMsgs[inMsgs.length - 1];
+      var ts = new Date(last.timestamp.replace(' ', 'T') + 'Z');
+      var diffH = (Date.now() - ts.getTime()) / 3600000;
+      if (diffH <= 24) {
+        badge.textContent = 'Window open ✓';
+        badge.className   = 'window-badge window-open';
+        warn.style.display  = 'none';
+        input.disabled      = false;
+        btn.disabled        = false;
+      } else {
+        setWindowClosed(badge, warn, input, btn);
+      }
+    })
+    .catch(function(){ });
+}
+
+function setWindowClosed(badge, warn, input, btn) {
+  badge.textContent  = 'Window closed';
+  badge.className    = 'window-badge window-closed';
+  warn.style.display = '';
+  input.disabled     = true;
+  btn.disabled       = true;
+}
+
+/* ── Append a message bubble ── */
+function appendBubble(m) {
+  var container = document.getElementById('chatMessages');
+  var row = document.createElement('div');
+  row.className = 'msg-row ' + m.direction;
+  row.dataset.id = m.id;
+  var time = m.timestamp ? m.timestamp.substr(11, 5) : '';
+  var statusIcon = '';
+  if (m.direction === 'out') {
+    statusIcon = m.status === 'read' ? ' ✓✓' : m.status === 'delivered' ? ' ✓✓' : m.status === 'sent' ? ' ✓' : ' ⏳';
+  }
+  row.innerHTML = '<div class="bubble">' + escHtml(m.content)
+    + '<span class="bubble-time">' + time + statusIcon + '</span></div>';
+  container.appendChild(row);
+  container.scrollTop = container.scrollHeight;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+/* ── Poll for new messages ── */
+function pollMessages() {
+  if (!ACTIVE_PHONE) return;
+  fetch('/api/inbox/messages?phone=' + ACTIVE_PHONE + '&after=' + lastMsgId)
+    .then(function(r){ return r.json(); })
+    .then(function(msgs) {
+      msgs.forEach(function(m) {
+        if (m.id > lastMsgId) {
+          appendBubble(m);
+          lastMsgId = m.id;
+          if (m.direction === 'in') checkWindow();
+        }
+      });
+    })
+    .catch(function(){});
+}
+
+if (ACTIVE_PHONE) {
+  checkWindow();
+  pollTimer = setInterval(pollMessages, 3000);
+}
+
+/* ── Send message ── */
+function sendMessage() {
+  var input = document.getElementById('msgInput');
+  var text  = input.value.trim();
+  if (!text || !ACTIVE_PHONE) return;
+
+  var btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  fetch('/api/inbox/send', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ phone: ACTIVE_PHONE, text: text }),
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data) {
+    if (data.ok) {
+      input.value = '';
+      input.style.height = '';
+      appendBubble({ id: data.id, direction: 'out', content: text,
+                     timestamp: new Date().toISOString().replace('T',' ').substr(0,19),
+                     status: 'sent' });
+      lastMsgId = data.id;
+    } else {
+      alert('Failed to send: ' + data.error);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Send ➤';
+  })
+  .catch(function(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Send ➤';
+  });
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+/* ── Filter conversations ── */
+function filterConvs(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.conv-item').forEach(function(el) {
+    var name  = el.dataset.name  || '';
+    var phone = el.dataset.phone || '';
+    el.style.display = (!q || name.includes(q) || phone.includes(q)) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

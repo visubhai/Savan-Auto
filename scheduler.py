@@ -1,0 +1,150 @@
+"""
+Background scheduler that polls scheduled_jobs every minute and triggers sending.
+Runs in a daemon thread when Flask app starts.
+"""
+import threading
+import time
+import json
+from database import (
+    get_due_jobs, update_scheduled_job, create_batch,
+    log_message, update_batch_counts, complete_batch,
+    upsert_customer, get_template_by_name, get_setting,
+)
+from meta_api import WhatsAppAPI
+
+
+# Track running batches: {batch_id: {'total', 'sent', 'failed', 'current_name', 'status'}}
+RUNNING_BATCHES = {}
+
+
+def send_batch(batch_id, passengers, template_name, user_id=None):
+    """Send a batch of messages. Runs in a background thread."""
+    template = get_template_by_name(template_name)
+    if not template:
+        RUNNING_BATCHES[batch_id] = {
+            "total": len(passengers), "sent": 0, "failed": len(passengers),
+            "current_name": "", "status": "error",
+            "error": f"Template '{template_name}' not found in database. Go to Templates → Sync Templates.",
+        }
+        complete_batch(batch_id)
+        return
+
+    if template.get("status", "").lower() not in ("approved", "active"):
+        error_msg = (
+            f"Template '{template_name}' is not approved (status: {template.get('status', 'unknown')}). "
+            f"Go to Templates → Sync Templates, then check Meta Business Manager."
+        )
+        for p in passengers:
+            log_message(
+                batch_id, p["phone"], p.get("name"), p.get("route"),
+                p.get("platform"), template_name, "failed", error=error_msg,
+            )
+        update_batch_counts(batch_id, failed=len(passengers))
+        complete_batch(batch_id)
+        RUNNING_BATCHES[batch_id] = {
+            "total": len(passengers), "sent": 0, "failed": len(passengers),
+            "current_name": "", "status": "completed",
+        }
+        return
+
+    language = template["language"]
+    var_count = template["variable_count"]
+
+    api = WhatsAppAPI()
+    delay = float(get_setting("delay_between_messages", "1.5"))
+
+    RUNNING_BATCHES[batch_id] = {
+        "total": len(passengers), "sent": 0, "failed": 0,
+        "current_name": "", "status": "running",
+    }
+
+    for idx, p in enumerate(passengers):
+        # Build parameters based on template variable count
+        params = []
+        if var_count >= 1:
+            params.append(p.get("name") or "Customer")
+        if var_count >= 2:
+            params.append(p.get("route") or "your journey")
+        if var_count >= 3:
+            params.append(p.get("platform") or "the platform")
+
+        RUNNING_BATCHES[batch_id]["current_name"] = p.get("name", "")
+
+        success, result = api.send_template(
+            p["phone"], template_name, language, params
+        )
+
+        if success:
+            log_message(
+                batch_id, p["phone"], p.get("name"), p.get("route"),
+                p.get("platform"), template_name, "sent", wa_msg_id=result,
+            )
+            upsert_customer(p["phone"], p.get("name"),
+                            p.get("route"), p.get("platform"))
+            update_batch_counts(batch_id, sent=1)
+            RUNNING_BATCHES[batch_id]["sent"] += 1
+        else:
+            log_message(
+                batch_id, p["phone"], p.get("name"), p.get("route"),
+                p.get("platform"), template_name, "failed", error=result,
+            )
+            update_batch_counts(batch_id, failed=1)
+            RUNNING_BATCHES[batch_id]["failed"] += 1
+
+        # Throttle
+        if idx < len(passengers) - 1:
+            time.sleep(delay)
+
+    complete_batch(batch_id)
+    RUNNING_BATCHES[batch_id]["status"] = "completed"
+
+
+def start_send_thread(passengers, template_name, batch_name, user_id):
+    """Create a batch and start a sending thread. Returns batch_id."""
+    batch_id = create_batch(batch_name, template_name, len(passengers), user_id)
+    thread = threading.Thread(
+        target=send_batch,
+        args=(batch_id, passengers, template_name, user_id),
+        daemon=True,
+    )
+    thread.start()
+    return batch_id
+
+
+def scheduler_loop():
+    """Check for due scheduled jobs every minute."""
+    while True:
+        try:
+            due = get_due_jobs()
+            for job in due:
+                try:
+                    passengers = json.loads(job["csv_data"])
+                    batch_id = create_batch(
+                        f"Scheduled: {job['name']}", job["template_name"],
+                        len(passengers), job["created_by"],
+                    )
+                    update_scheduled_job(job["id"], "running", batch_id)
+                    thread = threading.Thread(
+                        target=_run_scheduled,
+                        args=(job["id"], batch_id, passengers,
+                              job["template_name"]),
+                        daemon=True,
+                    )
+                    thread.start()
+                except Exception as e:
+                    update_scheduled_job(job["id"], "error")
+                    print(f"Failed to start scheduled job {job['id']}: {e}")
+        except Exception as e:
+            print(f"Scheduler error: {e}")
+        time.sleep(60)
+
+
+def _run_scheduled(job_id, batch_id, passengers, template_name):
+    send_batch(batch_id, passengers, template_name)
+    update_scheduled_job(job_id, "completed", batch_id)
+
+
+def start_scheduler():
+    """Start the scheduler in a daemon thread."""
+    thread = threading.Thread(target=scheduler_loop, daemon=True)
+    thread.start()

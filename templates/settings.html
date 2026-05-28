@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<div style="max-width:680px;">
+
+  <!-- API Credentials -->
+  <form method="POST" action="{{ url_for('settings') }}">
+  <div class="card" style="padding:24px;margin-bottom:16px;">
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:4px;">WhatsApp API Credentials</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Meta Developer → Your App → WhatsApp → System User permanent token.</div>
+
+    <label class="input-label">Access Token (permanent)</label>
+    <div style="position:relative;margin-bottom:16px;">
+      <input type="password" name="access_token" id="tokenInput"
+             value="{{ settings.access_token }}"
+             placeholder="EAAxxxxxxx… (leave blank to keep current)"
+             class="input" style="padding-right:90px;">
+      <button type="button" onclick="toggleToken()" class="btn btn-ghost btn-sm"
+              style="position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:11px;" id="tokenToggle">Show</button>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:-10px;margin-bottom:16px;">
+      ⚠ This is your permanent token from System User. Never share it.
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
+      <div>
+        <label class="input-label">Phone Number ID</label>
+        <input type="text" name="phone_number_id" value="{{ settings.phone_number_id }}" class="input">
+      </div>
+      <div>
+        <label class="input-label">WABA ID</label>
+        <input type="text" name="waba_id" value="{{ settings.waba_id }}" class="input">
+      </div>
+    </div>
+
+    <label class="input-label">API Version</label>
+    <input type="text" name="api_version" value="{{ settings.api_version }}" class="input" style="margin-bottom:20px;max-width:150px;">
+
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+      <button type="button" id="testBtn" class="btn btn-ghost" onclick="testConnection()">🔌 Test Connection</button>
+      <span id="testResult" style="font-size:13px;"></span>
+    </div>
+  </div>
+
+  <!-- Sending Behaviour -->
+  <div class="card" style="padding:24px;margin-bottom:16px;">
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:20px;">Sending Behaviour</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
+      <div>
+        <label class="input-label">Delay Between Messages (seconds)</label>
+        <input type="number" name="delay_between_messages" value="{{ settings.delay_between_messages }}"
+               step="0.5" min="0.5" max="10" class="input">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Keep at 1.5s minimum to avoid Meta rate limits</div>
+      </div>
+      <div>
+        <label class="input-label">Max Retries on Failure</label>
+        <input type="number" name="max_retries" value="{{ settings.max_retries }}"
+               min="1" max="5" class="input">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Retries per message on 429/timeout errors</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div>
+        <label class="input-label">Cost Per Message (₹)</label>
+        <input type="number" name="cost_per_message" value="{{ settings.cost_per_message }}"
+               step="0.01" min="0" class="input">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">₹0.12 for Utility (India, 2024)</div>
+      </div>
+      <div>
+        <label class="input-label">Wapsolution Monthly Cost (₹)</label>
+        <input type="number" name="wapsolution_monthly_cost" value="{{ settings.wapsolution_monthly_cost }}"
+               min="0" class="input">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Used to calculate your monthly savings</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Webhook / Inbox -->
+  <div class="card" style="padding:24px;margin-bottom:16px;">
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:6px;">💬 Inbox Webhook</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px;">Configure this in Meta Business Manager → WhatsApp → Configuration → Webhook so incoming customer messages appear in your Inbox.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div>
+        <label class="input-label">Callback URL (paste in Meta)</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="webhookUrl" readonly value="{{ settings.webhook_url or (request.host_url.rstrip('/') + '/webhook') }}" class="input" style="flex:1;color:#ccc;font-size:12px;">
+          <button type="button" onclick="copyWebhook()" class="btn btn-ghost btn-sm">Copy</button>
+        </div>
+        <div style="font-size:11px;color:#555;margin-top:4px;">This is your permanent public URL — copy it into Meta once, never change it again.</div>
+      </div>
+      <div>
+        <label class="input-label">Verify Token (copy exactly into Meta)</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="verifyToken" readonly value="{{ settings.webhook_verify_token or '' }}" class="input" style="flex:1;font-family:monospace;font-size:13px;">
+          <button type="button" onclick="copyToken()" class="btn btn-ghost btn-sm">Copy</button>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <button type="button" onclick="copyAllAndOpenMeta()" class="btn btn-primary" style="font-size:13.5px;padding:11px 20px;">
+        🚀 Copy URL &amp; Open Meta Webhook Settings
+      </button>
+      <span id="copiedHint" style="font-size:12px;color:#4caf50;display:none;">✓ Copied! Paste the URL in Meta now.</span>
+    </div>
+    <div style="margin-top:10px;padding:10px 14px;background:#111;border-radius:8px;font-size:12px;color:#555;line-height:1.9;">
+      <strong style="color:#4caf50;">✓ ngrok starts automatically</strong> when you launch the app — URL never changes.<br>
+      Click the button above → Meta opens → paste <strong style="color:#aaa;">Callback URL</strong> → paste <strong style="color:#aaa;">Verify Token</strong> → subscribe to <strong style="color:#aaa;">messages</strong> → Save. Done forever.
+    </div>
+  </div>
+
+  <!-- Business Info -->
+  <div class="card" style="padding:24px;margin-bottom:16px;">
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:16px;">Business Info</div>
+    <label class="input-label">Business Name (shown in sidebar)</label>
+    <input type="text" name="business_name" value="{{ settings.business_name }}" class="input" style="max-width:320px;">
+  </div>
+
+  <button type="submit" class="btn btn-primary" style="font-size:15px;padding:13px 28px;">💾 Save Settings</button>
+  </form>
+
+  <!-- Change Password (separate form) -->
+  <div class="card" style="padding:24px;margin-top:16px;">
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:16px;">Change Password</div>
+    <form method="POST" action="{{ url_for('change_password') }}">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px;">
+        <div>
+          <label class="input-label">Current Password</label>
+          <input type="password" name="current_password" class="input" required>
+        </div>
+        <div>
+          <label class="input-label">New Password</label>
+          <input type="password" name="new_password" class="input" required minlength="6">
+        </div>
+        <div>
+          <label class="input-label">Confirm New Password</label>
+          <input type="password" name="confirm_password" class="input" required>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-ghost">🔑 Update Password</button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copyWebhook() {
+  var url = document.getElementById('webhookUrl').value;
+  navigator.clipboard.writeText(url).then(function(){ toast('Webhook URL copied!'); });
+}
+function copyToken() {
+  var v = document.getElementById('verifyToken').value;
+  navigator.clipboard.writeText(v).then(function(){ toast('Verify token copied!'); });
+}
+function copyAllAndOpenMeta() {
+  var url = document.getElementById('webhookUrl').value;
+  navigator.clipboard.writeText(url).then(function() {
+    var hint = document.getElementById('copiedHint');
+    hint.style.display = '';
+    setTimeout(function(){ hint.style.display = 'none'; }, 4000);
+  });
+  // Open Meta for Developers → WhatsApp Configuration
+  window.open('https://developers.facebook.com/apps/', '_blank');
+}
+
+function toggleToken() {
+  const inp = document.getElementById('tokenInput');
+  const btn = document.getElementById('tokenToggle');
+  if (inp.type === 'password') { inp.type = 'text'; btn.textContent = 'Hide'; }
+  else { inp.type = 'password'; btn.textContent = 'Show'; }
+}
+
+async function testConnection() {
+  const btn = document.getElementById('testBtn');
+  const res = document.getElementById('testResult');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin" style="display:inline-block;">⏳</span> Testing…';
+  res.textContent = '';
+  try {
+    const r = await fetch("{{ url_for('settings_test') }}", { method: 'POST' });
+    const d = await r.json();
+    res.style.color = d.success ? '#22c55e' : '#ef4444';
+    res.textContent = d.success ? '✓ ' + d.message : '✗ ' + d.message;
+  } catch(e) {
+    res.style.color = '#ef4444';
+    res.textContent = '✗ Connection failed — check internet';
+  }
+  btn.disabled = false;
+  btn.innerHTML = '🔌 Test Connection';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+{% block page_title %}Message History{% endblock %}
+{% block topbar_actions %}
+  <a href="{{ url_for('history_export') }}?q={{ q }}&status={{ status or '' }}&days={{ days or '' }}" class="btn btn-ghost btn-sm">
+    ⬇ Export CSV
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filters bar -->
+<div class="card" style="padding:16px 20px;margin-bottom:16px;">
+  <form method="GET" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+    <div style="flex:1;min-width:200px;">
+      <label class="input-label">Search</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="Name or phone…" class="input">
+    </div>
+    <div style="width:130px;">
+      <label class="input-label">Status</label>
+      <select name="status" class="input">
+        <option value="">All</option>
+        <option value="sent" {% if status=='sent' %}selected{% endif %}>✓ Sent</option>
+        <option value="failed" {% if status=='failed' %}selected{% endif %}>✗ Failed</option>
+      </select>
+    </div>
+    <div style="width:130px;">
+      <label class="input-label">Period</label>
+      <select name="days" class="input">
+        <option value="">All time</option>
+        <option value="1" {% if days==1 %}selected{% endif %}>Today</option>
+        <option value="7" {% if days==7 %}selected{% endif %}>Last 7 days</option>
+        <option value="30" {% if days==30 %}selected{% endif %}>Last 30 days</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">🔍 Filter</button>
+    {% if q or status or days %}
+    <a href="{{ url_for('history') }}" class="btn btn-ghost">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+<!-- Count bar -->
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 2px;">
+  <div style="font-size:13px;color:var(--muted);">
+    Showing <strong style="color:#ccc;">{{ messages|length }}</strong> of <strong style="color:#ccc;">{{ total }}</strong> messages
+  </div>
+  {% if total > 0 %}
+  <div style="font-size:12px;color:var(--muted);">Page {{ page }} of {{ total_pages }}</div>
+  {% endif %}
+</div>
+
+<!-- Table -->
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Sent At</th>
+          <th>Passenger</th>
+          <th>Phone</th>
+          <th>Route</th>
+          <th>Platform</th>
+          <th>Template</th>
+          <th>Status</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in messages %}
+        <tr>
+          <td style="font-size:12px;color:var(--muted);white-space:nowrap;">{{ m.sent_at or '—' }}</td>
+          <td style="font-weight:500;color:#e0e0e0;">{{ m.customer_name or '—' }}</td>
+          <td style="font-family:monospace;font-size:12px;color:#888;">{{ m.customer_phone }}</td>
+          <td style="font-size:12.5px;">{{ m.route or '—' }}</td>
+          <td style="font-size:12.5px;">{{ m.platform or '—' }}</td>
+          <td style="font-size:11px;color:#666;">{{ m.template_name or '—' }}</td>
+          <td>
+            <span class="status-dot badge-{{ m.status }}">
+              {{ '✓' if m.status=='sent' else '✗' if m.status=='failed' else '…' }}
+              {{ m.status }}
+            </span>
+          </td>
+          <td style="font-size:11px;color:#f87171;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="{{ m.error_message or '' }}">
+            {{ m.error_message[:60] + '…' if m.error_message and m.error_message|length > 60 else m.error_message or '' }}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" style="text-align:center;color:var(--muted);padding:40px;">
+            {% if q or status or days %}
+              No messages match your filters. <a href="{{ url_for('history') }}" style="color:var(--amber);">Clear filters</a>
+            {% else %}
+              No messages yet. <a href="{{ url_for('send') }}" style="color:var(--amber);">Send your first batch →</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div style="display:flex;justify-content:center;margin-top:20px;">
+  <div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page-1 }}&q={{ q }}&status={{ status or '' }}&days={{ days or '' }}" class="page-btn">← Prev</a>
+    {% endif %}
+    {% for p in range([1, page-2]|max, [total_pages, page+2]|min + 1) %}
+    <a href="?page={{ p }}&q={{ q }}&status={{ status or '' }}&days={{ days or '' }}" class="page-btn {{ 'active' if p==page else '' }}">{{ p }}</a>
+    {% endfor %}
+    {% if page < total_pages %}
+    <a href="?page={{ page+1 }}&q={{ q }}&status={{ status or '' }}&days={{ days or '' }}" class="page-btn">Next →</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

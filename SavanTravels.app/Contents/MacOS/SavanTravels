@@ -1,0 +1,36 @@
+#!/bin/bash
+
+PYTHON=/opt/anaconda3/bin/python3
+LSOF=/usr/sbin/lsof
+OPEN=/usr/bin/open
+OSASCRIPT=/usr/bin/osascript
+NGROK=/opt/homebrew/bin/ngrok
+
+APP_DIR="/Users/vishvampaghadar/Downloads/SavanTravels 2"
+PORT=5001
+DOMAIN="gymnogenous-johanna-contrasty.ngrok-free.dev"
+
+# ── Start Flask server if not already running ──────────────────────────────
+if ! $LSOF -ti :$PORT > /dev/null 2>&1; then
+    $OSASCRIPT << EOF
+tell application "Terminal"
+    activate
+    set srv to do script "cd '$APP_DIR' && PORT=$PORT $PYTHON app.py"
+    set custom title of front window to "Savan Travels — Server"
+end tell
+EOF
+    # Wait for Flask to be ready
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        sleep 0.5
+        if $LSOF -ti :$PORT > /dev/null 2>&1; then break; fi
+    done
+fi
+
+# ── Start ngrok tunnel if not already running ──────────────────────────────
+if ! pgrep -x ngrok > /dev/null 2>&1; then
+    $NGROK http --domain=$DOMAIN $PORT > /tmp/ngrok-savan.log 2>&1 &
+    sleep 2
+fi
+
+# ── Open app in browser ───────────────────────────────────────────────────
+$OPEN "http://localhost:$PORT"

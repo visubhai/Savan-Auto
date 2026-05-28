@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Sending…{% endblock %}
+{% block page_title %}Sending in Progress{% endblock %}
+{% block topbar_actions %}
+  <a href="{{ url_for('dashboard') }}" class="btn btn-ghost btn-sm">← Dashboard</a>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:700px;">
+
+  <!-- Main progress card -->
+  <div class="card" style="padding:28px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:22px;">
+      <div style="font-size:28px;" id="statusIcon">⏳</div>
+      <div style="flex:1;">
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:20px;font-weight:700;" id="statusTitle">Starting send…</div>
+        <div style="font-size:13px;color:var(--muted);">Batch #{{ batch.id }} · {{ batch.template_name }}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:32px;font-weight:800;color:var(--amber);" id="pctText">0%</div>
+        <div style="font-size:12px;color:var(--muted);" id="countText">0 / {{ batch.total_count }}</div>
+      </div>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="progress-track" style="height:12px;margin-bottom:22px;">
+      <div class="progress-fill" id="progressFill" style="width:0%;"></div>
+    </div>
+
+    <!-- Stats row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:18px;">
+      <div class="card2" style="padding:12px;text-align:center;">
+        <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#22c55e;" id="sentCount">0</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">✓ Sent</div>
+      </div>
+      <div class="card2" style="padding:12px;text-align:center;">
+        <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#f87171;" id="failedCount">0</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">✗ Failed</div>
+      </div>
+      <div class="card2" style="padding:12px;text-align:center;">
+        <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#888;" id="remainCount">{{ batch.total_count }}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">⏳ Remaining</div>
+      </div>
+      <div class="card2" style="padding:12px;text-align:center;">
+        <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:var(--amber);" id="etaText">—</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">⏱ ETA (min)</div>
+      </div>
+    </div>
+
+    <div style="font-size:13px;color:#888;" id="currentName"></div>
+  </div>
+
+  <!-- Live log -->
+  <div class="card" style="margin-bottom:16px;">
+    <div style="padding:12px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:13px;font-weight:600;">Live Log</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <div class="pulse" style="font-size:11px;color:var(--amber);" id="liveIndicator">● LIVE</div>
+        <button onclick="document.getElementById('liveLog').innerHTML=''" class="btn btn-ghost btn-sm" style="font-size:11px;">Clear</button>
+      </div>
+    </div>
+    <div class="live-log" id="liveLog" style="margin:10px;margin-top:6px;min-height:100px;">
+      <div class="log-line">Initializing batch #{{ batch.id }}…</div>
+    </div>
+  </div>
+
+  <!-- Action buttons (visible when done) -->
+  <div id="doneActions" style="display:none;">
+    <div id="successBox" style="display:none;" class="flash flash-success" style="margin-bottom:12px;">
+      ✓ Batch complete! All messages processed.
+    </div>
+    <div id="partialBox" style="display:none;" class="flash flash-error" style="margin-bottom:12px;">
+      ⚠ Some messages failed. Use "Retry Failed" to resend them.
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <a href="{{ url_for('history') }}" class="btn btn-primary" style="flex:1;justify-content:center;">📋 View History</a>
+      <form method="POST" action="{{ url_for('send_retry', batch_id=batch.id) }}" id="retryForm" style="flex:1;">
+        <button type="submit" class="btn btn-ghost" style="width:100%;justify-content:center;" id="retryBtn">🔁 Retry Failed</button>
+      </form>
+      <a href="{{ url_for('send') }}" class="btn btn-ghost" style="flex:1;justify-content:center;">📤 New Send</a>
+    </div>
+  </div>
+
+  <!-- Warning: don't close -->
+  <div id="runningWarning" style="margin-top:14px;">
+    <div class="card2" style="padding:12px 16px;border:1px solid rgba(245,158,11,0.2);">
+      <div style="font-size:12.5px;color:#aaa;">⚠ <strong style="color:#f59e0b;">Don't close this tab or Terminal</strong> while sending is in progress. Messages will stop if the server stops.</div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const batchId = {{ batch.id }};
+const total = {{ batch.total_count }};
+const delay = 1.5; // seconds per message (for ETA)
+let lastSent = 0;
+let isDone = false;
+const log = document.getElementById('liveLog');
+let startTime = Date.now();
+
+function addLog(text, cls='') {
+  const t = new Date().toLocaleTimeString('en-IN');
+  const d = document.createElement('div');
+  d.className = 'log-line ' + cls;
+  d.textContent = `${t}  ${text}`;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  while (log.children.length > 150) log.removeChild(log.firstChild);
+}
+
+async function poll() {
+  if (isDone) return;
+  try {
+    const r = await fetch(`/send/status/${batchId}`);
+    if (!r.ok) { setTimeout(poll, 3000); return; }
+    const d = await r.json();
+
+    const sent = d.sent || 0;
+    const failed = d.failed || 0;
+    const done = sent + failed;
+    const pct = total > 0 ? Math.round(done / total * 100) : 0;
+    const remain = Math.max(0, total - done);
+
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('pctText').textContent = pct + '%';
+    document.getElementById('countText').textContent = `${done} / ${total}`;
+    document.getElementById('sentCount').textContent = sent;
+    document.getElementById('failedCount').textContent = failed;
+    document.getElementById('remainCount').textContent = remain;
+
+    // ETA
+    if (done > 0 && remain > 0) {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const rate = done / elapsed;
+      const etaMins = Math.round(remain / rate / 60 * 10) / 10;
+      document.getElementById('etaText').textContent = etaMins < 1 ? '<1' : etaMins;
+    }
+
+    // Log new messages
+    if (d.current_name && sent > lastSent) {
+      const delta = sent - lastSent;
+      addLog(`✓ Sent to ${d.current_name}`, 'log-sent');
+    }
+    if (failed > 0 && d.status !== 'completed') {
+      // Will show errors in history
+    }
+    lastSent = sent;
+
+    if (d.current_name && d.status === 'running') {
+      document.getElementById('currentName').textContent = `⏳ Sending to: ${d.current_name}…`;
+    }
+
+    if (d.status === 'completed') {
+      isDone = true;
+      document.getElementById('statusIcon').textContent = failed === 0 ? '✅' : '⚠️';
+      document.getElementById('statusTitle').textContent = failed === 0 ? 'All messages sent!' : `Done — ${failed} failed`;
+      document.getElementById('liveIndicator').textContent = '● DONE';
+      document.getElementById('liveIndicator').classList.remove('pulse');
+      document.getElementById('liveIndicator').style.color = failed === 0 ? '#22c55e' : '#f59e0b';
+      document.getElementById('currentName').textContent = '';
+      document.getElementById('etaText').textContent = '0';
+      document.getElementById('doneActions').style.display = 'block';
+      document.getElementById('runningWarning').style.display = 'none';
+
+      if (failed === 0) {
+        document.getElementById('successBox').style.display = 'flex';
+        document.getElementById('retryForm').style.display = 'none';
+      } else {
+        document.getElementById('partialBox').style.display = 'flex';
+      }
+      addLog(`✓ Batch complete. Sent: ${sent}, Failed: ${failed}`, 'log-sent');
+      return;
+    }
+  } catch(e) {
+    addLog('Connection error — retrying…', 'log-failed');
+  }
+  setTimeout(poll, 2000);
+}
+
+// Start polling after short delay
+setTimeout(poll, 800);
+</script>
+{% endblock %}

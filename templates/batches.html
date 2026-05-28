@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Batch History{% endblock %}
+{% block page_title %}Send Batches{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Name / File</th><th>Template</th><th>Total</th>
+          <th>Sent</th><th>Failed</th><th>Status</th><th>Started At</th><th>View</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in batches %}
+        <tr>
+          <td style="color:var(--muted);">{{ b.id }}</td>
+          <td style="font-weight:500;color:#e0e0e0;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ b.name or '—' }}</td>
+          <td style="font-size:12px;color:#888;">{{ b.template_name }}</td>
+          <td style="text-align:center;font-weight:600;">{{ b.total_count }}</td>
+          <td style="text-align:center;color:#22c55e;font-weight:600;">{{ b.sent_count }}</td>
+          <td style="text-align:center;color:{% if b.failed_count > 0 %}#ef4444{% else %}#555{% endif %};font-weight:600;">{{ b.failed_count }}</td>
+          <td>
+            <span class="status-dot badge-{{ b.status }}">
+              {{ {'completed':'✓','running':'▶','pending':'⏳','error':'✗'}.get(b.status,'?') }}
+              {{ b.status }}
+            </span>
+          </td>
+          <td style="font-size:12px;color:var(--muted);white-space:nowrap;">{{ b.started_at[:16] if b.started_at else '—' }}</td>
+          <td>
+            <a href="{{ url_for('send_progress', batch_id=b.id) }}" class="btn btn-ghost btn-sm">View</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--muted);">No batches yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% block title %}Preview & Edit{% endblock %}
+{% block page_title %}Preview, Edit & Send{% endblock %}
+{% block topbar_actions %}
+  <a href="{{ url_for('send') }}" class="btn btn-ghost btn-sm">← Upload new CSV</a>
+{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px;">
+
+  <!-- Parse summary cards -->
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px;">
+    <div class="card2" style="padding:14px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#fff;" id="totalRows">{{ pending.stats.total_rows }}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;">Total rows</div>
+    </div>
+    <div class="card2" style="padding:14px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#f87171;">{{ pending.stats.cancelled }}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;">Cancelled</div>
+    </div>
+    <div class="card2" style="padding:14px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#fb923c;">{{ pending.stats.duplicates }}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;">Duplicates</div>
+    </div>
+    <div class="card2" style="padding:14px;text-align:center;">
+      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#888;">{{ pending.stats.invalid }}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;">Filtered</div>
+    </div>
+    <div class="card" style="padding:14px;text-align:center;border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.05);">
+      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:var(--amber);" id="readyCount">{{ pending.stats.ready }}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px;">Ready to send</div>
+    </div>
+  </div>
+
+  {% if pending.stats.ready == 0 %}
+  <div class="flash flash-error">
+    ✗ No valid passengers found. Check your CSV has phone numbers.
+    <a href="{{ url_for('send') }}" style="color:#fca5a5;margin-left:8px;">← Upload again</a>
+  </div>
+  {% else %}
+
+  <!-- Two column layout: send options left, table right -->
+  <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start;">
+
+    <!-- Left: send options panel -->
+    <div>
+      <!-- Cost estimate -->
+      <div class="card2" style="padding:14px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+          <span style="font-size:12px;color:var(--muted);">Selected</span>
+          <span style="font-size:16px;font-weight:800;color:var(--amber);" id="selectedCount">{{ pending.stats.ready }}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--muted);">Est. cost</span>
+          <span style="font-size:14px;font-weight:700;color:#fff;" id="estCost">₹{{ estimated_cost }}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="font-size:12px;color:var(--muted);">Est. time</span>
+          <span style="font-size:14px;font-weight:700;color:#fff;" id="estTime">{{ estimated_mins }} min</span>
+        </div>
+      </div>
+
+      <!-- Template selector -->
+      <div class="card" style="padding:16px;margin-bottom:12px;">
+        <label class="input-label">Template</label>
+        <select class="input" id="tplSelect" style="margin-bottom:12px;">
+          {% for t in templates %}
+          <option value="{{ t.name }}" {% if default_tpl and t.name==default_tpl.name %}selected{% endif %}>
+            {{ t.name }} {% if t.status=='approved' %}✓{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:6px;">Preview</div>
+        <pre style="font-size:11.5px;color:#bbb;white-space:pre-wrap;line-height:1.6;margin:0;max-height:140px;overflow-y:auto;" id="tplBody">{% if default_tpl %}{{ default_tpl.body }}{% endif %}</pre>
+      </div>
+
+      <!-- Send now button -->
+      {% if needs_confirm %}
+      <div class="flash flash-info" style="margin-bottom:10px;font-size:12px;">
+        ⚠ Large batch. App must stay running for ~{{ estimated_mins }} min.
+      </div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('send_start') }}" id="sendForm">
+        <input type="hidden" name="template_name" id="hiddenTpl" value="{{ default_tpl.name if default_tpl else '' }}">
+        <input type="hidden" name="passengers_json" id="passengersJson" value="">
+        {% if needs_confirm %}<input type="hidden" name="confirmed" value="yes">{% endif %}
+        <button type="button" onclick="submitSend()" class="btn btn-primary" style="width:100%;justify-content:center;font-size:14px;padding:12px;margin-bottom:8px;" id="sendBtn">
+          🚀 Send to <span id="btnCount">{{ pending.stats.ready }}</span> passengers
+        </button>
+      </form>
+
+      <!-- Schedule -->
+      <button type="button" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:13px;" id="scheduleToggle">⏰ Schedule Later</button>
+      <form method="POST" action="{{ url_for('send_schedule') }}" id="scheduleForm" style="display:none;margin-top:10px;">
+        <input type="hidden" name="template_name" id="scheduleTpl" value="{{ default_tpl.name if default_tpl else '' }}">
+        <label class="input-label" style="margin-top:8px;">Date & Time</label>
+        <input type="datetime-local" name="scheduled_for" class="input" style="margin-bottom:8px;" id="scheduleDt">
+        <button type="submit" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:12px;">📅 Confirm Schedule</button>
+      </form>
+
+      <!-- Select all / none -->
+      <div style="margin-top:12px;display:flex;gap:6px;">
+        <button type="button" class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;" onclick="selectAll(true)">✓ All</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;" onclick="selectAll(false)">✗ None</button>
+      </div>
+    </div>
+
+    <!-- Right: editable passenger table -->
+    <div class="card" style="overflow:hidden;">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-size:14px;font-weight:700;">
+          Passengers
+          <span style="font-size:12px;font-weight:400;color:var(--muted);">— click any cell to edit</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);" id="tableInfo">{{ pending.passengers|length }} total</div>
+      </div>
+      <div style="overflow-x:auto;max-height:600px;overflow-y:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;" id="passengerTable">
+          <thead style="position:sticky;top:0;background:#1a1a1a;z-index:2;">
+            <tr>
+              <th style="padding:9px 10px;text-align:center;width:36px;">
+                <input type="checkbox" id="checkAll" checked style="cursor:pointer;" onchange="toggleAll(this.checked)">
+              </th>
+              <th style="padding:9px 10px;text-align:left;font-size:10px;font-weight:600;letter-spacing:0.06em;color:var(--muted);text-transform:uppercase;">#</th>
+              <th style="padding:9px 10px;text-align:left;font-size:10px;font-weight:600;letter-spacing:0.06em;color:var(--muted);text-transform:uppercase;">Name</th>
+              <th style="padding:9px 10px;text-align:left;font-size:10px;font-weight:600;letter-spacing:0.06em;color:var(--muted);text-transform:uppercase;">Phone</th>
+              <th style="padding:9px 10px;text-align:left;font-size:10px;font-weight:600;letter-spacing:0.06em;color:var(--muted);text-transform:uppercase;">Route</th>
+              <th style="padding:9px 10px;text-align:left;font-size:10px;font-weight:600;letter-spacing:0.06em;color:var(--muted);text-transform:uppercase;">Platform</th>
+            </tr>
+          </thead>
+          <tbody id="passengerBody">
+            {% for p in pending.passengers %}
+            <tr data-idx="{{ loop.index0 }}" class="pax-row" style="border-bottom:1px solid rgba(255,255,255,0.03);">
+              <td style="padding:7px 10px;text-align:center;">
+                <input type="checkbox" class="pax-check" checked style="cursor:pointer;">
+              </td>
+              <td style="padding:7px 10px;color:var(--muted);font-size:11px;">{{ loop.index }}</td>
+              <td style="padding:7px 10px;">
+                <div class="editable" data-field="name" style="color:#e0e0e0;font-weight:500;cursor:text;min-width:80px;">{{ p.name }}</div>
+              </td>
+              <td style="padding:7px 10px;">
+                <div class="editable" data-field="phone" style="font-family:monospace;font-size:11.5px;color:#888;cursor:text;min-width:100px;">{{ p.phone }}</div>
+              </td>
+              <td style="padding:7px 10px;">
+                <div class="editable" data-field="route" style="color:#aaa;cursor:text;min-width:120px;">{{ p.route or '—' }}</div>
+              </td>
+              <td style="padding:7px 10px;">
+                <div class="editable" data-field="platform" style="color:#aaa;cursor:text;min-width:80px;">{{ p.platform or '—' }}</div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.editable { border-radius:4px; padding:2px 4px; transition:background 0.1s; }
+.editable:hover { background:rgba(255,255,255,0.05); }
+.editable.editing { background:#2a2a2a; outline:1px solid var(--amber); }
+.pax-row.skip-row { opacity:0.35; }
+.pax-row.skip-row td:not(:first-child) { text-decoration:line-through; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Template data ──
+const tplMap = {};
+{% for t in templates %}
+  tplMap[{{ t.name|tojson }}] = {{ t.body|tojson }};
+{% endfor %}
+
+const costPerMsg = {{ (estimated_cost / pending.stats.ready)|round(4) if pending.stats.ready else 0.12 }};
+const delayPerMsg = {{ estimated_mins * 60 / pending.stats.ready if pending.stats.ready else 1.5 }};
+
+// ── Passenger data (editable copy) ──
+let passengers = {{ pending.passengers|tojson }};
+
+// ── Template selector ──
+document.getElementById('tplSelect')?.addEventListener('change', function() {
+  document.getElementById('tplBody').textContent = tplMap[this.value] || '';
+  document.getElementById('hiddenTpl').value = this.value;
+  document.getElementById('scheduleTpl').value = this.value;
+});
+
+// ── Inline editing ──
+document.querySelectorAll('.editable').forEach(el => {
+  el.addEventListener('click', function() {
+    if (this.classList.contains('editing')) return;
+    this.classList.add('editing');
+    const orig = this.textContent.trim() === '—' ? '' : this.textContent.trim();
+    const input = document.createElement('input');
+    input.value = orig;
+    input.style.cssText = 'background:transparent;border:none;outline:none;width:100%;color:inherit;font:inherit;padding:0;';
+    this.textContent = '';
+    this.appendChild(input);
+    input.focus();
+    input.select();
+
+    const save = () => {
+      const val = input.value.trim();
+      const row = this.closest('tr');
+      const idx = parseInt(row.dataset.idx);
+      const field = this.dataset.field;
+      passengers[idx][field] = val;
+      this.classList.remove('editing');
+      this.textContent = val || '—';
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); save(); }
+      if (e.key === 'Escape') { this.classList.remove('editing'); this.textContent = orig || '—'; }
+      if (e.key === 'Tab') { e.preventDefault(); save(); moveFocus(this, e.shiftKey); }
+    });
+  });
+});
+
+function moveFocus(el, backward) {
+  const cells = [...document.querySelectorAll('.editable')];
+  const idx = cells.indexOf(el);
+  const next = cells[backward ? idx - 1 : idx + 1];
+  if (next) next.click();
+}
+
+// ── Checkbox management ──
+function updateCounts() {
+  const rows = document.querySelectorAll('.pax-row');
+  let selected = 0;
+  rows.forEach((row, i) => {
+    const cb = row.querySelector('.pax-check');
+    if (cb.checked) selected++;
+  });
+  document.getElementById('selectedCount').textContent = selected;
+  document.getElementById('readyCount').textContent = selected;
+  document.getElementById('btnCount').textContent = selected;
+  document.getElementById('estCost').textContent = '₹' + (selected * costPerMsg).toFixed(2);
+  document.getElementById('estTime').textContent = (selected * delayPerMsg / 60).toFixed(1) + ' min';
+  document.getElementById('tableInfo').textContent = selected + ' selected of ' + rows.length;
+}
+
+document.querySelectorAll('.pax-check').forEach(cb => {
+  cb.addEventListener('change', function() {
+    const row = this.closest('tr');
+    row.classList.toggle('skip-row', !this.checked);
+    updateCounts();
+  });
+});
+
+function toggleAll(checked) {
+  document.querySelectorAll('.pax-check').forEach(cb => {
+    cb.checked = checked;
+    cb.closest('tr').classList.toggle('skip-row', !checked);
+  });
+  document.getElementById('checkAll').checked = checked;
+  updateCounts();
+}
+
+function selectAll(v) { toggleAll(v); }
+
+// ── Submit ──
+function submitSend() {
+  const selected = [];
+  document.querySelectorAll('.pax-row').forEach((row, i) => {
+    const cb = row.querySelector('.pax-check');
+    if (cb.checked) selected.push(passengers[parseInt(row.dataset.idx)]);
+  });
+
+  if (selected.length === 0) {
+    alert('No passengers selected! Check at least one row.');
+    return;
+  }
+
+  if (selected.length > 200) {
+    if (!confirm(`Send to ${selected.length} passengers? This will take ~${(selected.length * delayPerMsg / 60).toFixed(1)} minutes.`)) return;
+  }
+
+  document.getElementById('passengersJson').value = JSON.stringify(selected);
+  document.getElementById('hiddenTpl').value = document.getElementById('tplSelect').value;
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Starting…';
+  document.getElementById('sendForm').submit();
+}
+
+// ── Schedule toggle ──
+document.getElementById('scheduleToggle')?.addEventListener('click', function() {
+  const sf = document.getElementById('scheduleForm');
+  sf.style.display = sf.style.display === 'none' ? 'block' : 'none';
+  if (!document.getElementById('scheduleDt').value) {
+    const d = new Date(); d.setDate(d.getDate()+1); d.setHours(10,0,0);
+    document.getElementById('scheduleDt').value = d.toISOString().slice(0,16);
+  }
+});
+</script>
+{% endblock %}
