@@ -5,6 +5,7 @@ Tables: users, settings, templates, customers, messages, batches, scheduled_jobs
 """
 import sqlite3
 import hashlib
+import json
 import secrets
 from datetime import datetime
 from pathlib import Path
@@ -128,9 +129,19 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'pending',
             created_by INTEGER,
             batch_id INTEGER,
+            var_overrides TEXT DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
             FOREIGN KEY (created_by) REFERENCES users(id),
             FOREIGN KEY (batch_id) REFERENCES batches(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS campaigns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            template_name TEXT NOT NULL,
+            variables TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
+            last_used_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS chats (
@@ -154,6 +165,12 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_chats_phone ON chats(phone);
         CREATE INDEX IF NOT EXISTS idx_chats_ts ON chats(timestamp);
         """)
+
+    # Lightweight migration: add var_overrides column to older scheduled_jobs tables
+    with get_db() as db:
+        cols = {r["name"] for r in db.execute("PRAGMA table_info(scheduled_jobs)").fetchall()}
+        if "var_overrides" not in cols:
+            db.execute("ALTER TABLE scheduled_jobs ADD COLUMN var_overrides TEXT DEFAULT ''")
 
     # Seed default admin if no users exist
     with get_db() as db:
@@ -530,13 +547,13 @@ def get_top_routes(limit=5):
 
 
 # ---------------- Scheduled jobs ----------------
-def create_scheduled_job(name, csv_data, template_name, scheduled_for, created_by):
+def create_scheduled_job(name, csv_data, template_name, scheduled_for, created_by, var_overrides=None):
     with get_db() as db:
         cur = db.execute(
             """INSERT INTO scheduled_jobs (name, csv_data, template_name,
-               scheduled_for, created_by)
-               VALUES (?, ?, ?, ?, ?)""",
-            (name, csv_data, template_name, scheduled_for, created_by),
+               scheduled_for, created_by, var_overrides)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (name, csv_data, template_name, scheduled_for, created_by, var_overrides or ""),
         )
         return cur.lastrowid
 
@@ -647,6 +664,76 @@ def get_new_messages(phone, after_id):
             "SELECT * FROM chats WHERE phone=? AND id>? ORDER BY timestamp ASC",
             (phone, after_id),
         ).fetchall()
+
+
+# ---------------- Bulk Campaigns ----------------
+def _campaign_to_dict(row):
+    """Return a campaign as a plain dict with variables parsed to a list."""
+    if row is None:
+        return None
+    d = dict(row)
+    try:
+        d["variables"] = json.loads(d.get("variables") or "[]")
+    except Exception:
+        d["variables"] = []
+    return d
+
+
+def create_campaign(name, template_name, variables):
+    with get_db() as db:
+        cur = db.execute(
+            "INSERT INTO campaigns (name, template_name, variables) VALUES (?, ?, ?)",
+            (name, template_name, json.dumps(variables or [])),
+        )
+        return cur.lastrowid
+
+
+def list_campaigns():
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM campaigns ORDER BY created_at DESC").fetchall()
+        return [_campaign_to_dict(r) for r in rows]
+
+
+def get_campaign(campaign_id):
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM campaigns WHERE id=?", (int(campaign_id),)
+        ).fetchone()
+        return _campaign_to_dict(row)
+
+
+def update_campaign(campaign_id, name, template_name, variables):
+    with get_db() as db:
+        db.execute(
+            "UPDATE campaigns SET name=?, template_name=?, variables=? WHERE id=?",
+            (name, template_name, json.dumps(variables or []), int(campaign_id)),
+        )
+
+
+def update_campaign_last_used(campaign_id):
+    with get_db() as db:
+        db.execute(
+            "UPDATE campaigns SET last_used_at=datetime('now', '+330 minutes') WHERE id=?",
+            (int(campaign_id),),
+        )
+
+
+def delete_campaign(campaign_id):
+    with get_db() as db:
+        db.execute("DELETE FROM campaigns WHERE id=?", (int(campaign_id),))
+
+
+# ---------------- User management ----------------
+def change_user_password(user_id, new_hash):
+    with get_db() as db:
+        db.execute(
+            "UPDATE users SET password_hash=? WHERE id=?", (new_hash, int(user_id))
+        )
+
+
+def delete_user(user_id):
+    with get_db() as db:
+        db.execute("DELETE FROM users WHERE id=?", (int(user_id),))
 
 
 if __name__ == "__main__":

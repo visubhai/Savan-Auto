@@ -140,9 +140,13 @@ def scheduler_loop():
             for job in due:
                 try:
                     passengers = json.loads(job["csv_data"])
-                    # Optional fixed variable overrides stored with the job
+                    # Optional fixed variable overrides stored with the job.
+                    # Works for both MongoDB dicts and sqlite3.Row (no .get()).
                     var_overrides = {}
-                    raw_ov = job.get("var_overrides")
+                    try:
+                        raw_ov = job["var_overrides"]
+                    except (KeyError, IndexError):
+                        raw_ov = None
                     if raw_ov:
                         try:
                             var_overrides = json.loads(raw_ov) if isinstance(raw_ov, str) else raw_ov

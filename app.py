@@ -86,6 +86,17 @@ def clear_pending(key):
         pass
 
 
+def _safe_int(val, default=0, minimum=None):
+    """Parse an int from untrusted input without crashing."""
+    try:
+        n = int(str(val).strip())
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and n < minimum:
+        return minimum
+    return n
+
+
 def _parse_var_overrides(raw):
     """Parse the var_overrides JSON from a form field into a clean dict.
 
@@ -510,7 +521,7 @@ def history():
     status = request.args.get("status", "").strip() or None
     days_str = request.args.get("days", "").strip()
     days = int(days_str) if days_str.isdigit() else None
-    page = max(1, int(request.args.get("page", "1")))
+    page = _safe_int(request.args.get("page", "1"), default=1, minimum=1)
     per_page = 50
     offset = (page - 1) * per_page
 
@@ -559,7 +570,7 @@ def customers():
     q = request.args.get("q", "").strip()
     filter_opt = request.args.get("filter", "").strip()
     opted_out = True if filter_opt == "opted_out" else (False if filter_opt == "active" else None)
-    page = max(1, int(request.args.get("page", "1")))
+    page = _safe_int(request.args.get("page", "1"), default=1, minimum=1)
     per_page = 50
     offset = (page - 1) * per_page
 
@@ -987,7 +998,7 @@ def inbox_send():
 @login_required
 def inbox_poll():
     phone    = request.args.get("phone", "")
-    after_id = int(request.args.get("after", 0))
+    after_id = _safe_int(request.args.get("after", 0), default=0, minimum=0)
     if not phone:
         return jsonify([])
     msgs = [dict(m) for m in db.get_new_messages(phone, after_id)]

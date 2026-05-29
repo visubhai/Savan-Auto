@@ -39,6 +39,11 @@ if not MONGO_URI:
         get_recent_sends, get_top_routes,
         create_scheduled_job, list_scheduled_jobs,
         get_due_jobs, update_scheduled_job, delete_scheduled_job,
+        create_campaign, list_campaigns, get_campaign, update_campaign,
+        update_campaign_last_used, delete_campaign,
+        save_chat_message, get_conversation, list_conversations, mark_read,
+        get_unread_count, update_chat_status, get_new_messages,
+        change_user_password, delete_user,
         init_db, hash_password, verify_password,
     )
 else:
