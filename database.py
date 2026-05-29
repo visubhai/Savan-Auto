@@ -470,11 +470,15 @@ else:
         )
 
     def get_due_jobs():
-        now = _now()
+        # scheduled_for is stored in IST (user's browser local time)
+        # so compare against IST, not UTC
+        from datetime import timezone, timedelta as _td
+        IST = timezone(_td(hours=5, minutes=30))
+        now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
         return _clean_many(
             _db().scheduled_jobs.find({
                 "status": "pending",
-                "scheduled_for": {"$lte": now},
+                "scheduled_for": {"$lte": now_ist},
             }).sort("scheduled_for", ASCENDING)
         )
 
