@@ -39,16 +39,31 @@ def clean_route(raw):
 def clean_platform(raw):
     if not raw: return ""
     s = re.sub(r"\s*\(.*?\)\s*", "", str(raw)).strip()
-    lower = s.lower().replace(" ", "").replace("-", "")
-    return {
-        "redbus": "RedBus", "abhibus": "AbhiBus",
-        "paytm": "Paytm", "paytmdirect": "Paytm", "paytmtravel": "Paytm",
-        "makemytrip": "MakeMyTrip", "mmt": "MakeMyTrip",
-        "goibibo": "Goibibo", "easemytrip": "EaseMyTrip",
-        "yatra": "Yatra", "ixigo": "Ixigo", "railyatri": "RailYatri",
+    lower = s.lower().replace(" ", "").replace("-", "").replace("_", "")
+
+    # Match known platforms by substring so suffixes like "Dir", "Direct",
+    # "Online", "Travel" are stripped — e.g. "Abhibus Dir" → "AbhiBus".
+    # Order matters: check longer/more specific names first.
+    known = [
+        ("makemytrip", "MakeMyTrip"), ("easemytrip", "EaseMyTrip"),
+        ("railyatri", "RailYatri"), ("redbus", "RedBus"),
+        ("abhibus", "AbhiBus"), ("goibibo", "Goibibo"),
+        ("paytm", "Paytm"), ("yatra", "Yatra"),
+        ("ixigo", "Ixigo"), ("mmt", "MakeMyTrip"),
+    ]
+    for kw, name in known:
+        if kw in lower:
+            return name
+
+    # Generic booking sources (exact match)
+    exact = {
         "direct": "Direct", "offline": "Offline", "counter": "Counter",
         "website": "Website", "app": "App",
-    }.get(lower, s.title() if s else "")
+    }
+    if lower in exact:
+        return exact[lower]
+
+    return s.title() if s else ""
 
 
 def _decode(content):
@@ -295,6 +310,33 @@ def parse_redbus_csv(text, filename=""):
         "invalid_phones": invalid,
         "total_rows_seen": total,
     }
+
+
+# ── Bulk Campaign: extract ALL phone numbers from any file ────────────────────
+def extract_all_phones(content, filename=""):
+    """
+    Extract every valid Indian mobile number from any file — CSV, TXT, Excel export,
+    WhatsApp export, copy-pasted list, etc. Ignores structure; just hunts for numbers.
+    Returns list of unique cleaned phones (e.g. '919876543210').
+    """
+    text = _decode(content) if isinstance(content, (bytes, bytearray)) else str(content)
+
+    # Find all digit clusters that could be phone numbers (7–15 digits, allow spaces/dashes)
+    candidates = re.findall(r'[\+\d][\d\s\(\)\-\.]{6,16}[\d]', text)
+    phones = []
+    seen = set()
+    for c in candidates:
+        digits = re.sub(r'\D', '', c)
+        # Try various sub-sequences in case multiple numbers are jammed together
+        for length in (12, 11, 10):
+            if len(digits) >= length:
+                chunk = digits[:length]
+                cleaned = clean_phone(chunk)
+                if cleaned and cleaned not in seen:
+                    seen.add(cleaned)
+                    phones.append(cleaned)
+                    break
+    return phones
 
 
 # ── Auto-detect and parse ─────────────────────────────────────────────────────

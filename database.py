@@ -6,10 +6,18 @@ Falls back to SQLite (database_sqlite.py) if MONGO_URI is not set.
 import os
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 load_dotenv()
+
+# All app timestamps use India Standard Time (UTC+5:30), regardless of where
+# the server runs (e.g. Render runs in UTC).
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def now_ist():
+    """Current IST time as a naive datetime (clock time in India)."""
+    return datetime.now(IST).replace(tzinfo=None)
 
 MONGO_URI = os.environ.get("MONGO_URI", "")
 DB_NAME   = os.environ.get("MONGO_DB", "savan_travels")
@@ -46,10 +54,10 @@ else:
         return _client[DB_NAME]
 
     def _now():
-        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        return now_ist().strftime("%Y-%m-%d %H:%M:%S")
 
     def _today():
-        return datetime.utcnow().strftime("%Y-%m-%d")
+        return now_ist().strftime("%Y-%m-%d")
 
     def _next_id(name):
         """Atomic auto-increment integer ID per collection."""
@@ -194,6 +202,37 @@ else:
 
     def delete_user(user_id):
         _db().users.delete_one({"id": int(user_id)})
+
+    # ── Bulk Campaigns ────────────────────────────────────────────────────────
+
+    def create_campaign(name, template_name, variables):
+        campaign_id = _next_id("campaigns")
+        _db().campaigns.insert_one({
+            "id": campaign_id,
+            "name": name,
+            "template_name": template_name,
+            "variables": variables,
+            "created_at": _now(),
+            "last_used_at": None,
+        })
+        return campaign_id
+
+    def list_campaigns():
+        return _clean_many(_db().campaigns.find().sort("created_at", DESCENDING))
+
+    def get_campaign(campaign_id):
+        return _clean(_db().campaigns.find_one({"id": int(campaign_id)}))
+
+    def update_campaign(campaign_id, name, template_name, variables):
+        _db().campaigns.update_one({"id": int(campaign_id)}, {"$set": {
+            "name": name, "template_name": template_name, "variables": variables,
+        }})
+
+    def update_campaign_last_used(campaign_id):
+        _db().campaigns.update_one({"id": int(campaign_id)}, {"$set": {"last_used_at": _now()}})
+
+    def delete_campaign(campaign_id):
+        _db().campaigns.delete_one({"id": int(campaign_id)})
 
     # ── Templates ─────────────────────────────────────────────────────────────
 
@@ -361,7 +400,7 @@ else:
         if status:
             filt["status"] = status
         if days:
-            cutoff = (datetime.utcnow() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
+            cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
             filt["sent_at"] = {"$gte": cutoff}
         cursor = (
             _db().messages.find(filt)
@@ -380,7 +419,7 @@ else:
         if status:
             filt["status"] = status
         if days:
-            cutoff = (datetime.utcnow() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
+            cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
             filt["sent_at"] = {"$gte": cutoff}
         return _db().messages.count_documents(filt)
 
@@ -404,7 +443,7 @@ else:
         return {"sent": sent, "failed": failed, "cost": round(sent * cost_per, 2)}
 
     def get_month_stats():
-        month_start = datetime.utcnow().strftime("%Y-%m-01")
+        month_start = now_ist().strftime("%Y-%m-01")
         sent   = _db().messages.count_documents({"status": "sent",   "sent_at": {"$gte": month_start}})
         failed = _db().messages.count_documents({"status": "failed", "sent_at": {"$gte": month_start}})
         cost_per = float(get_setting("cost_per_message", "0.12"))
@@ -416,7 +455,7 @@ else:
         }
 
     def get_chart_data(days=7):
-        cutoff = (datetime.utcnow() - timedelta(days=int(days))).strftime("%Y-%m-%d")
+        cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d")
         pipeline = [
             {"$match": {"sent_at": {"$gte": cutoff}}},
             {"$group": {
@@ -446,7 +485,7 @@ else:
 
     # ── Scheduled jobs ────────────────────────────────────────────────────────
 
-    def create_scheduled_job(name, csv_data, template_name, scheduled_for, created_by):
+    def create_scheduled_job(name, csv_data, template_name, scheduled_for, created_by, var_overrides=None):
         job_id = _next_id("scheduled_jobs")
         _db().scheduled_jobs.insert_one({
             "id": job_id,
@@ -457,6 +496,7 @@ else:
             "status": "pending",
             "created_by": created_by,
             "batch_id": None,
+            "var_overrides": var_overrides or "",
             "created_at": _now(),
         })
         return job_id
@@ -470,15 +510,13 @@ else:
         )
 
     def get_due_jobs():
-        # scheduled_for is stored in IST (user's browser local time)
-        # so compare against IST, not UTC
-        from datetime import timezone, timedelta as _td
-        IST = timezone(_td(hours=5, minutes=30))
-        now_ist = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+        # scheduled_for is stored in IST (user's browser local time),
+        # so compare against IST now.
+        now_str = _now()
         return _clean_many(
             _db().scheduled_jobs.find({
                 "status": "pending",
-                "scheduled_for": {"$lte": now_ist},
+                "scheduled_for": {"$lte": now_str},
             }).sort("scheduled_for", ASCENDING)
         )
 

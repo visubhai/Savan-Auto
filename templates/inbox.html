@@ -54,6 +54,14 @@
   .send-btn { background:var(--amber); color:#000; border:none; border-radius:10px; padding:10px 18px; font-weight:700; font-size:14px; cursor:pointer; flex-shrink:0; }
   .send-btn:disabled { opacity:.4; cursor:not-allowed; }
   .window-warn { padding:8px 14px; background:#2a1800; border-top:1px solid #4a2800; font-size:12px; color:#f0a040; text-align:center; }
+
+  /* Mobile: stack conversation list above the chat */
+  @media (max-width: 820px) {
+    .inbox-wrap { flex-direction:column; height:auto; min-height:0; gap:0; }
+    .conv-list { width:100%; max-height:240px; border-radius:12px 12px 0 0; }
+    .chat-wrap { border-left:1px solid var(--border); border-radius:0 0 12px 12px; min-height:62vh; }
+    .bubble { max-width:85%; }
+  }
 </style>
 
 <div class="inbox-wrap">
@@ -190,7 +198,8 @@ function checkWindow() {
       var inMsgs = data.filter(function(m){ return m.direction === 'in'; });
       if (inMsgs.length === 0) { setWindowClosed(badge, warn, input, btn); return; }
       var last = inMsgs[inMsgs.length - 1];
-      var ts = new Date(last.timestamp.replace(' ', 'T') + 'Z');
+      // Stored timestamps are IST (UTC+5:30) — parse with the IST offset
+      var ts = new Date(last.timestamp.replace(' ', 'T') + '+05:30');
       var diffH = (Date.now() - ts.getTime()) / 3600000;
       if (diffH <= 24) {
         badge.textContent = 'Window open ✓';
@@ -277,7 +286,7 @@ function sendMessage() {
       input.value = '';
       input.style.height = '';
       appendBubble({ id: data.id, direction: 'out', content: text,
-                     timestamp: new Date().toISOString().replace('T',' ').substr(0,19),
+                     timestamp: new Date(Date.now() + 330*60000).toISOString().replace('T',' ').substr(0,19),
                      status: 'sent' });
       lastMsgId = data.id;
     } else {

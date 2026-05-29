@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block title %}Send Campaign — {{ campaign.name }}{% endblock %}
+{% block page_title %}Send Campaign{% endblock %}
+
+{% block content %}
+<style>
+  .cs-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; max-width:960px; }
+  .info-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:16px; }
+  .var-pills { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .var-pill { background:#1a2a1a; color:#8bc34a; border:1px solid #2a4a2a; border-radius:6px; padding:3px 10px; font-size:12px; font-family:monospace; }
+  .var-pill span { color:#666; margin-right:4px; }
+  .msg-preview { background:#111; border:1px solid var(--border); border-radius:10px; padding:14px 16px; font-size:13px; color:#aaa; white-space:pre-wrap; line-height:1.7; }
+
+  .drop-zone { border:2px dashed var(--border); border-radius:10px; padding:28px 16px; text-align:center; cursor:pointer; transition:border-color .2s, background .2s; }
+  .drop-zone:hover, .drop-zone.drag-over { border-color:var(--amber); background:rgba(251,191,36,.04); }
+
+  .phone-list-wrap { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .phone-list-head { padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+  .phone-count-badge { background:var(--amber); color:#000; font-size:11px; font-weight:700; padding:2px 8px; border-radius:99px; }
+  .phone-textarea { width:100%; box-sizing:border-box; background:#0e0e0e; border:none; outline:none; color:#ccc; font-family:monospace; font-size:13px; line-height:1.8; padding:14px 16px; resize:vertical; min-height:260px; max-height:440px; }
+  .phone-textarea::placeholder { color:#333; }
+  .manual-add { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--border); background:var(--card); }
+  .manual-add input { flex:1; background:#111; border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:#ccc; font-family:monospace; font-size:13px; outline:none; }
+  .manual-add input:focus { border-color:var(--amber); }
+
+  .pill-bar { display:flex; gap:8px; flex-wrap:wrap; padding:10px 16px; border-bottom:1px solid var(--border); background:#0e0e0e; }
+  .pill-num { background:#1a1a1a; border:1px solid var(--border); border-radius:20px; padding:3px 10px 3px 12px; font-size:12px; font-family:monospace; color:#aaa; display:flex; align-items:center; gap:6px; }
+  .pill-num button { background:none; border:none; color:#555; cursor:pointer; font-size:12px; padding:0; line-height:1; }
+  .pill-num button:hover { color:#ef4444; }
+</style>
+
+<a href="{{ url_for('campaigns') }}" style="color:#666;font-size:13px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:14px;">← Back to Campaigns</a>
+
+<form method="POST" id="sendForm">
+  <input type="hidden" name="phones_json" id="phonesJson">
+
+  <div class="cs-grid">
+
+    <!-- ── Left column ── -->
+    <div>
+      <!-- Campaign info -->
+      <div class="info-card">
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;color:#ddd;">🎯 {{ campaign.name }}</div>
+        <div style="font-size:12px;color:#666;margin-top:3px;">Template: <strong style="color:#aaa;">{{ campaign.template_name }}</strong></div>
+        {% if campaign.variables %}
+        <div class="var-pills">
+          {% for v in campaign.variables %}
+          <div class="var-pill"><span>{{"{{"}}{{ loop.index }}{{"}}"}}</span>{{ v }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if template and template.body %}
+        <div style="margin-top:12px;">
+          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Message Preview</div>
+          <div class="msg-preview" id="msgPreview">{{ template.body }}</div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- File upload -->
+      <div class="info-card">
+        <div style="font-size:14px;font-weight:600;color:#ddd;margin-bottom:4px;">📂 Upload File to Extract Numbers</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px;">CSV, Excel, TXT, WhatsApp export — numbers extracted automatically</div>
+
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <div style="font-size:28px;margin-bottom:6px;">📁</div>
+          <div style="font-size:13px;color:#888;"><strong style="color:#ccc;">Click to upload</strong> or drag & drop</div>
+          <div style="font-size:11px;color:#555;margin-top:4px;">CSV · TXT · Excel (.xlsx) · VCF</div>
+          <input type="file" id="fileInput" multiple style="display:none;" onchange="handleFiles(this.files)">
+        </div>
+
+        <div id="fileList" style="margin-top:8px;"></div>
+        <div id="extractStatus" style="font-size:12px;color:#666;margin-top:8px;display:none;"></div>
+      </div>
+    </div>
+
+    <!-- ── Right column: editable number list ── -->
+    <div>
+      <div class="phone-list-wrap">
+        <div class="phone-list-head">
+          <div>
+            <div style="font-size:14px;font-weight:600;color:#ddd;">📱 Phone Numbers</div>
+            <div style="font-size:12px;color:#666;margin-top:1px;">Edit freely — one number per line</div>
+          </div>
+          <span class="phone-count-badge" id="countBadge">0</span>
+        </div>
+
+        <textarea class="phone-textarea" id="phoneTextarea"
+          placeholder="Numbers appear here after upload&#10;&#10;Or type/paste manually:&#10;9876543210&#10;9123456789&#10;+91 98765 43210"
+          oninput="onTextareaChange()"></textarea>
+
+        <!-- Manual add bar -->
+        <div class="manual-add">
+          <input type="text" id="manualInput" placeholder="Type a number and press Enter or Add…"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();addManual();}">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addManual()">+ Add</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="color:#ef4444;" onclick="clearAll()" title="Clear all">🗑</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px;padding:12px 16px;background:#111;border-radius:10px;font-size:12px;color:#555;line-height:1.8;">
+        <strong style="color:#888;">Tips:</strong><br>
+        • Each line = one number (10 or 12 digits)<br>
+        • Delete a line to remove a number<br>
+        • Paste a whole list at once<br>
+        • Invalid lines are ignored on send
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="sendBtn" disabled
+              style="font-size:15px;padding:14px;width:100%;margin-top:14px;">
+        🚀 Send to <span id="sendCount">0</span> Numbers
+      </button>
+    </div>
+
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var fileStore = [];
+var phoneSet  = [];   // ordered unique list of cleaned phones
+
+/* ── Phone cleaner (mirrors Python logic) ─────────────────────────────────── */
+function cleanPhone(raw) {
+  var digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+  digits = digits.replace(/^0+/, '');
+  if (digits.length === 10) digits = '91' + digits;
+  else if (digits.length === 11 && digits[0] === '0') digits = '91' + digits.slice(1);
+  else if (digits.length === 12 && digits.startsWith('91')) { /* ok */ }
+  else if (digits.length === 13 && digits.startsWith('910')) digits = '91' + digits.slice(3);
+  else if (digits.length < 10 || digits.length > 15) return null;
+  if (!digits.startsWith('91') || digits.length !== 12) return null;
+  return digits;
+}
+
+/* ── Textarea sync ─────────────────────────────────────────────────────────── */
+function onTextareaChange() {
+  var lines = document.getElementById('phoneTextarea').value.split('\n');
+  var valid = [];
+  var seen  = {};
+  lines.forEach(function(line) {
+    var c = cleanPhone(line.trim());
+    if (c && !seen[c]) { seen[c] = 1; valid.push(c); }
+  });
+  phoneSet = valid;
+  updateCount();
+}
+
+function updateCount() {
+  var n = phoneSet.length;
+  document.getElementById('countBadge').textContent = n;
+  document.getElementById('sendCount').textContent  = n;
+  document.getElementById('sendBtn').disabled       = (n === 0);
+}
+
+/* ── Manual add ─────────────────────────────────────────────────────────────── */
+function addManual() {
+  var inp = document.getElementById('manualInput');
+  var val = inp.value.trim();
+  if (!val) return;
+  // Accept comma or space separated bulk paste too
+  var parts = val.split(/[\s,;]+/);
+  var ta = document.getElementById('phoneTextarea');
+  parts.forEach(function(p) {
+    var c = cleanPhone(p);
+    if (c) {
+      var cur = ta.value;
+      if (cur && !cur.endsWith('\n')) cur += '\n';
+      ta.value = cur + c;
+    }
+  });
+  inp.value = '';
+  onTextareaChange();
+}
+
+/* ── Clear all ──────────────────────────────────────────────────────────────── */
+function clearAll() {
+  if (!confirm('Clear all numbers?')) return;
+  document.getElementById('phoneTextarea').value = '';
+  phoneSet = [];
+  updateCount();
+}
+
+/* ── Drag & drop file upload ────────────────────────────────────────────────── */
+var dz = document.getElementById('dropZone');
+dz.addEventListener('dragover',  function(e){ e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', function(){  dz.classList.remove('drag-over'); });
+dz.addEventListener('drop',      function(e){ e.preventDefault(); dz.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+
+function handleFiles(files) {
+  for (var i = 0; i < files.length; i++) fileStore.push(files[i]);
+  renderFileList();
+  extractFromFiles();
+}
+
+function renderFileList() {
+  var html = '';
+  fileStore.forEach(function(f, i) {
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#111;border-radius:6px;margin-bottom:3px;font-size:12px;color:#ccc;">' +
+            '📄 ' + f.name +
+            '<span style="color:#555;margin-left:auto;">' + (f.size/1024).toFixed(1) + 'KB</span>' +
+            '<button type="button" onclick="removeFile(' + i + ')" style="background:none;border:none;color:#555;cursor:pointer;">✕</button></div>';
+  });
+  document.getElementById('fileList').innerHTML = html;
+}
+
+function removeFile(idx) {
+  fileStore.splice(idx, 1);
+  renderFileList();
+}
+
+function extractFromFiles() {
+  if (!fileStore.length) return;
+  var status = document.getElementById('extractStatus');
+  status.textContent = '⏳ Extracting numbers…';
+  status.style.display = '';
+  var fd = new FormData();
+  fileStore.forEach(function(f){ fd.append('phone_file', f); });
+  fetch('/api/campaigns/extract', { method:'POST', body:fd })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      status.textContent = '✓ Extracted ' + d.count + ' numbers from file(s)';
+      status.style.color = '#4caf50';
+      // Merge into textarea (deduplicate)
+      var ta = document.getElementById('phoneTextarea');
+      var existing = ta.value.trim();
+      var existSet = {};
+      existing.split('\n').forEach(function(l){ var c=cleanPhone(l.trim()); if(c) existSet[c]=1; });
+      var newLines = [];
+      d.phones_all.forEach(function(p){ if(!existSet[p]){ existSet[p]=1; newLines.push(p); } });
+      if (newLines.length) {
+        ta.value = (existing ? existing + '\n' : '') + newLines.join('\n');
+      }
+      onTextareaChange();
+    })
+    .catch(function(){ status.textContent = '✗ Failed to extract'; status.style.color='#ef4444'; });
+}
+
+/* ── Submit: put clean phone list in hidden field ───────────────────────────── */
+document.getElementById('sendForm').addEventListener('submit', function(e) {
+  onTextareaChange();
+  if (!phoneSet.length) { e.preventDefault(); alert('No valid numbers to send to.'); return; }
+  document.getElementById('phonesJson').value = JSON.stringify(phoneSet);
+  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('sendBtn').textContent = '⏳ Starting…';
+});
+
+/* ── Message preview with variable substitution ─────────────────────────────── */
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function updatePreview() {
+  var body = document.getElementById('msgPreview');
+  if (!body) return;
+  var text = body.dataset.raw || body.textContent;
+  body.dataset.raw = text;
+  var vars = {{ campaign.variables | tojson }};
+  for (var i = 0; i < vars.length; i++) {
+    var re = new RegExp('\\{\\{' + (i+1) + '\\}\\}', 'g');
+    text = text.replace(re, '<strong style="color:#8bc34a;">' + escHtml(vars[i]) + '</strong>');
+  }
+  body.innerHTML = text;
+}
+updatePreview();
+</script>
+{% endblock %}

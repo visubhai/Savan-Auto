@@ -16,7 +16,7 @@ from flask import (
 )
 
 import database as db
-from parsers import auto_parse
+from parsers import auto_parse, extract_all_phones
 from meta_api import WhatsAppAPI
 import scheduler
 
@@ -47,7 +47,7 @@ scheduler.start_scheduler()
 # ---------------- Session helpers (FIX 1: file-based pending store) ----------------
 def save_pending(data):
     """Save large pending data to temp file, return file key."""
-    key = f"pending_{session.get('user_id', 0)}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.json"
+    key = f"pending_{session.get('user_id', 0)}_{db.now_ist().strftime('%Y%m%d%H%M%S%f')}.json"
     path = os.path.join(TEMP_DIR, key)
     with open(path, "w") as f:
         json.dump(data, f)
@@ -84,6 +84,29 @@ def clear_pending(key):
         os.remove(path)
     except Exception:
         pass
+
+
+def _parse_var_overrides(raw):
+    """Parse the var_overrides JSON from a form field into a clean dict.
+
+    Returns {var_index_str: fixed_value} keeping only non-empty values.
+    e.g. '{"3":"RedBus","4":"Diwali Offer"}' -> {'3':'RedBus','4':'Diwali Offer'}
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    clean = {}
+    for k, v in data.items():
+        val = str(v).strip() if v is not None else ""
+        if val:
+            clean[str(k)] = val
+    return clean
 
 
 # ---------------- Auth decorators ----------------
@@ -164,8 +187,8 @@ def dashboard():
     recent = db.get_recent_sends(10)
     top_routes = db.get_top_routes(5)
 
-    from datetime import date, timedelta
-    today_date = date.today()
+    from datetime import timedelta
+    today_date = db.now_ist().date()
     chart_map = {row["day"]: row for row in chart_data}
     days = []
     for i in range(6, -1, -1):
@@ -349,9 +372,13 @@ def send_start():
             flash("Please confirm the large batch send.", "error")
             return redirect(url_for("send_preview"))
 
+    # Optional fixed variable values for this batch (for template vars not in CSV)
+    var_overrides = _parse_var_overrides(request.form.get("var_overrides", ""))
+
     batch_name = pending.get("filename", "Manual upload")
     batch_id = scheduler.start_send_thread(
         passengers, template_name, batch_name, session["user_id"],
+        var_overrides=var_overrides,
     )
     clear_pending(key)
     session.pop("pending_key", None)
@@ -375,7 +402,7 @@ def send_schedule():
 
     try:
         dt = datetime.fromisoformat(scheduled_for)
-        if dt <= datetime.now():
+        if dt <= db.now_ist():
             flash("Scheduled time must be in the future", "error")
             return redirect(url_for("send_preview"))
         scheduled_str = dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -383,16 +410,30 @@ def send_schedule():
         flash("Invalid schedule time format", "error")
         return redirect(url_for("send_preview"))
 
+    # Use edited passenger list if provided (same as send_start does)
+    passengers_json = request.form.get("passengers_json", "").strip()
+    if passengers_json:
+        try:
+            passengers = [p for p in json.loads(passengers_json) if p.get("phone")]
+        except Exception:
+            passengers = pending["passengers"]
+    else:
+        passengers = pending["passengers"]
+
+    # Optional fixed variable values for this batch (for template vars not in CSV)
+    var_overrides = _parse_var_overrides(request.form.get("var_overrides", ""))
+
     job_id = db.create_scheduled_job(
         name=pending.get("filename", "Scheduled batch"),
-        csv_data=json.dumps(pending["passengers"]),
+        csv_data=json.dumps(passengers),
         template_name=template_name,
         scheduled_for=scheduled_str,
         created_by=session["user_id"],
+        var_overrides=json.dumps(var_overrides) if var_overrides else "",
     )
     clear_pending(key)
     session.pop("pending_key", None)
-    flash(f"✓ Scheduled {len(pending['passengers'])} messages for {scheduled_str}", "success")
+    flash(f"✓ Scheduled {len(passengers)} messages for {scheduled_str}", "success")
     return redirect(url_for("scheduled"))
 
 
@@ -502,7 +543,7 @@ def history_export():
             m["status"], m["error_message"] or "", m["wa_message_id"] or "",
         ])
     output.seek(0)
-    filename = f"history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"history_{db.now_ist().strftime('%Y%m%d_%H%M%S')}.csv"
     return send_file(
         io.BytesIO(output.getvalue().encode("utf-8")),
         mimetype="text/csv",
@@ -694,6 +735,141 @@ def users_delete(user_id):
 def batches():
     all_batches = db.list_batches(100)
     return render_template("batches.html", batches=all_batches)
+
+
+# ---------------- Bulk Campaigns ----------------
+
+@app.route("/campaigns")
+@login_required
+def campaigns():
+    camps = db.list_campaigns()
+    templates = db.get_templates()
+    return render_template("campaigns.html", campaigns=camps, templates=templates)
+
+
+@app.route("/campaigns/create", methods=["POST"])
+@login_required
+def campaigns_create():
+    name          = request.form.get("name", "").strip()
+    template_name = request.form.get("template_name", "").strip()
+    # Collect variable values var_1, var_2, var_3 …
+    variables = []
+    for i in range(1, 6):
+        v = request.form.get(f"var_{i}", "").strip()
+        if v:
+            variables.append(v)
+    if not name or not template_name:
+        flash("Campaign name and template are required", "error")
+        return redirect(url_for("campaigns"))
+    db.create_campaign(name, template_name, variables)
+    flash(f"✓ Campaign '{name}' saved", "success")
+    return redirect(url_for("campaigns"))
+
+
+@app.route("/campaigns/<int:campaign_id>/edit", methods=["POST"])
+@login_required
+def campaigns_edit(campaign_id):
+    name          = request.form.get("name", "").strip()
+    template_name = request.form.get("template_name", "").strip()
+    variables = []
+    for i in range(1, 6):
+        v = request.form.get(f"var_{i}", "").strip()
+        if v:
+            variables.append(v)
+    if not name or not template_name:
+        flash("Name and template are required", "error")
+    else:
+        db.update_campaign(campaign_id, name, template_name, variables)
+        flash("✓ Campaign updated", "success")
+    return redirect(url_for("campaigns"))
+
+
+@app.route("/campaigns/<int:campaign_id>/delete", methods=["POST"])
+@login_required
+def campaigns_delete(campaign_id):
+    db.delete_campaign(campaign_id)
+    flash("Campaign deleted", "success")
+    return redirect(url_for("campaigns"))
+
+
+@app.route("/campaigns/<int:campaign_id>/send", methods=["GET", "POST"])
+@login_required
+def campaigns_send(campaign_id):
+    camp = db.get_campaign(campaign_id)
+    if not camp:
+        flash("Campaign not found", "error")
+        return redirect(url_for("campaigns"))
+    template = db.get_template_by_name(camp["template_name"])
+
+    if request.method == "POST":
+        # Read phone list submitted from the editable textarea (as JSON)
+        phones_json = request.form.get("phones_json", "").strip()
+        try:
+            all_phones = json.loads(phones_json) if phones_json else []
+        except Exception:
+            all_phones = []
+
+        # Clean & deduplicate
+        from parsers import clean_phone as _cp
+        seen = set()
+        cleaned = []
+        for p in all_phones:
+            c = _cp(str(p).strip())
+            if c and c not in seen:
+                seen.add(c)
+                cleaned.append(c)
+        all_phones = cleaned
+
+        if not all_phones:
+            flash("No valid phone numbers to send to. Add numbers on the right panel.", "error")
+            return render_template("campaign_send.html", campaign=camp, template=template)
+
+        # Filter opted-out
+        opted_out_phones = {r["phone"] for r in db.search_customers(opted_out=True, limit=50000)}
+        all_phones = [p for p in all_phones if p not in opted_out_phones]
+
+        if not all_phones:
+            flash("All numbers are opted out.", "error")
+            return render_template("campaign_send.html", campaign=camp, template=template)
+
+        passengers = [{"phone": p, "name": "Customer", "route": "", "platform": ""} for p in all_phones]
+        batch_name = f"[Campaign] {camp['name']}"
+        batch_id = scheduler.start_send_thread(
+            passengers, camp["template_name"], batch_name,
+            session["user_id"], fixed_params=camp["variables"],
+        )
+        db.update_campaign_last_used(campaign_id)
+        return redirect(url_for("send_progress", batch_id=batch_id))
+
+    return render_template("campaign_send.html", campaign=camp, template=template)
+
+
+@app.route("/api/campaigns/extract", methods=["POST"])
+@login_required
+def campaigns_extract():
+    """AJAX: upload file(s) and return count of extracted phone numbers."""
+    files = request.files.getlist("phone_file")
+    files = [f for f in files if f.filename]
+    all_phones = set()
+    for f in files:
+        content = f.read()
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext in (".xlsx", ".xls"):
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+                text_parts = []
+                for ws in wb.worksheets:
+                    for row in ws.iter_rows(values_only=True):
+                        for cell in row:
+                            if cell is not None:
+                                text_parts.append(str(cell))
+                content = " ".join(text_parts).encode("utf-8")
+            except Exception:
+                continue
+        phones = extract_all_phones(content, f.filename)
+        all_phones.update(phones)
+    return jsonify({"count": len(all_phones), "phones_all": list(all_phones)})
 
 
 # ---------------- Webhook (incoming WhatsApp messages) ----------------

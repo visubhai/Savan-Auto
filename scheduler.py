@@ -17,8 +17,14 @@ from meta_api import WhatsAppAPI
 RUNNING_BATCHES = {}
 
 
-def send_batch(batch_id, passengers, template_name, user_id=None):
-    """Send a batch of messages. Runs in a background thread."""
+def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=None, var_overrides=None):
+    """Send a batch of messages. Runs in a background thread.
+
+    var_overrides: optional dict {var_index(str/int): fixed_value}. When a value
+    is provided for a variable position, that fixed value is used for ALL
+    passengers in the batch (instead of the auto per-passenger value). Useful
+    when a template needs variables that aren't present in the CSV.
+    """
     template = get_template_by_name(template_name)
     if not template:
         RUNNING_BATCHES[batch_id] = {
@@ -59,14 +65,29 @@ def send_batch(batch_id, passengers, template_name, user_id=None):
     }
 
     for idx, p in enumerate(passengers):
-        # Build parameters based on template variable count
-        params = []
-        if var_count >= 1:
-            params.append(p.get("name") or "Customer")
-        if var_count >= 2:
-            params.append(p.get("route") or "your journey")
-        if var_count >= 3:
-            params.append(p.get("platform") or "the platform")
+        # Build parameters — use fixed_params for bulk campaigns, else per-passenger data
+        if fixed_params is not None:
+            params = list(fixed_params[:var_count])
+            # Pad if not enough values provided
+            while len(params) < var_count:
+                params.append("—")
+        else:
+            ov = var_overrides or {}
+            params = []
+            for i in range(1, var_count + 1):
+                fixed = ov.get(str(i)) or ov.get(i)
+                if fixed:
+                    # User-supplied fixed value for the whole batch
+                    params.append(str(fixed))
+                elif i == 1:
+                    params.append(p.get("name") or "Customer")
+                elif i == 2:
+                    params.append(p.get("route") or "your journey")
+                elif i == 3:
+                    params.append(p.get("platform") or "the platform")
+                else:
+                    # No auto source and no fixed value provided
+                    params.append("—")
 
         RUNNING_BATCHES[batch_id]["current_name"] = p.get("name", "")
 
@@ -99,12 +120,12 @@ def send_batch(batch_id, passengers, template_name, user_id=None):
     RUNNING_BATCHES[batch_id]["status"] = "completed"
 
 
-def start_send_thread(passengers, template_name, batch_name, user_id):
+def start_send_thread(passengers, template_name, batch_name, user_id, fixed_params=None, var_overrides=None):
     """Create a batch and start a sending thread. Returns batch_id."""
     batch_id = create_batch(batch_name, template_name, len(passengers), user_id)
     thread = threading.Thread(
         target=send_batch,
-        args=(batch_id, passengers, template_name, user_id),
+        args=(batch_id, passengers, template_name, user_id, fixed_params, var_overrides),
         daemon=True,
     )
     thread.start()
@@ -119,6 +140,14 @@ def scheduler_loop():
             for job in due:
                 try:
                     passengers = json.loads(job["csv_data"])
+                    # Optional fixed variable overrides stored with the job
+                    var_overrides = {}
+                    raw_ov = job.get("var_overrides")
+                    if raw_ov:
+                        try:
+                            var_overrides = json.loads(raw_ov) if isinstance(raw_ov, str) else raw_ov
+                        except Exception:
+                            var_overrides = {}
                     batch_id = create_batch(
                         f"Scheduled: {job['name']}", job["template_name"],
                         len(passengers), job["created_by"],
@@ -127,7 +156,7 @@ def scheduler_loop():
                     thread = threading.Thread(
                         target=_run_scheduled,
                         args=(job["id"], batch_id, passengers,
-                              job["template_name"]),
+                              job["template_name"], var_overrides),
                         daemon=True,
                     )
                     thread.start()
@@ -139,8 +168,8 @@ def scheduler_loop():
         time.sleep(60)
 
 
-def _run_scheduled(job_id, batch_id, passengers, template_name):
-    send_batch(batch_id, passengers, template_name)
+def _run_scheduled(job_id, batch_id, passengers, template_name, var_overrides=None):
+    send_batch(batch_id, passengers, template_name, var_overrides=var_overrides)
     update_scheduled_job(job_id, "completed", batch_id)
 
 

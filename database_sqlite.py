@@ -56,7 +56,7 @@ def init_db():
             password_hash TEXT NOT NULL,
             display_name TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'member',
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
         );
 
         CREATE TABLE IF NOT EXISTS settings (
@@ -74,7 +74,7 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'unknown',
             is_default INTEGER NOT NULL DEFAULT 0,
             synced_at TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
         );
 
         CREATE TABLE IF NOT EXISTS customers (
@@ -86,7 +86,7 @@ def init_db():
             total_messages INTEGER NOT NULL DEFAULT 0,
             last_messaged_at TEXT,
             opted_out INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
         );
 
         CREATE TABLE IF NOT EXISTS batches (
@@ -98,7 +98,7 @@ def init_db():
             failed_count INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'pending',
             started_by INTEGER,
-            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            started_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
             completed_at TEXT,
             FOREIGN KEY (started_by) REFERENCES users(id)
         );
@@ -115,7 +115,7 @@ def init_db():
             error_message TEXT,
             wa_message_id TEXT,
             sent_at TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
             FOREIGN KEY (batch_id) REFERENCES batches(id)
         );
 
@@ -128,7 +128,7 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'pending',
             created_by INTEGER,
             batch_id INTEGER,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
             FOREIGN KEY (created_by) REFERENCES users(id),
             FOREIGN KEY (batch_id) REFERENCES batches(id)
         );
@@ -141,7 +141,7 @@ def init_db():
             message_type TEXT NOT NULL DEFAULT 'text',
             content TEXT NOT NULL,
             wa_message_id TEXT,
-            timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+            timestamp TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
             read INTEGER NOT NULL DEFAULT 0,
             status TEXT
         );
@@ -278,7 +278,7 @@ def upsert_template(name, language, category, body, variable_count, status):
         if existing:
             db.execute(
                 """UPDATE templates SET language=?, category=?, body=?,
-                   variable_count=?, status=?, synced_at=datetime('now')
+                   variable_count=?, status=?, synced_at=datetime('now', '+330 minutes')
                    WHERE name=?""",
                 (language, category, body, variable_count, status, name),
             )
@@ -286,7 +286,7 @@ def upsert_template(name, language, category, body, variable_count, status):
             db.execute(
                 """INSERT INTO templates (name, language, category, body,
                    variable_count, status, synced_at)
-                   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+                   VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+330 minutes'))""",
                 (name, language, category, body, variable_count, status),
             )
 
@@ -308,7 +308,7 @@ def upsert_customer(phone, name, route, platform):
                 """UPDATE customers SET name=COALESCE(?, name),
                    last_route=?, last_platform=?,
                    total_messages=total_messages+1,
-                   last_messaged_at=datetime('now')
+                   last_messaged_at=datetime('now', '+330 minutes')
                    WHERE phone=?""",
                 (name, route, platform, phone),
             )
@@ -316,7 +316,7 @@ def upsert_customer(phone, name, route, platform):
             db.execute(
                 """INSERT INTO customers (phone, name, last_route, last_platform,
                    total_messages, last_messaged_at)
-                   VALUES (?, ?, ?, ?, 1, datetime('now'))""",
+                   VALUES (?, ?, ?, ?, 1, datetime('now', '+330 minutes'))""",
                 (phone, name, route, platform),
             )
 
@@ -385,7 +385,7 @@ def update_batch_counts(batch_id, sent=None, failed=None):
 def complete_batch(batch_id):
     with get_db() as db:
         db.execute(
-            "UPDATE batches SET status='completed', completed_at=datetime('now') WHERE id=?",
+            "UPDATE batches SET status='completed', completed_at=datetime('now', '+330 minutes') WHERE id=?",
             (batch_id,),
         )
 
@@ -409,7 +409,7 @@ def log_message(batch_id, phone, name, route, platform, template_name,
             """INSERT INTO messages (batch_id, customer_phone, customer_name,
                route, platform, template_name, status, error_message,
                wa_message_id, sent_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+330 minutes'))""",
             (batch_id, phone, name, route, platform, template_name,
              status, error, wa_msg_id),
         )
@@ -425,7 +425,7 @@ def search_messages(query="", status=None, days=None, limit=100, offset=0):
         sql += " AND status = ?"
         params.append(status)
     if days:
-        sql += f" AND sent_at >= datetime('now', '-{int(days)} days')"
+        sql += f" AND sent_at >= datetime('now', '+330 minutes', '-{int(days)} days')"
     sql += " ORDER BY sent_at DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
     with get_db() as db:
@@ -442,7 +442,7 @@ def count_messages(query="", status=None, days=None):
         sql += " AND status = ?"
         params.append(status)
     if days:
-        sql += f" AND sent_at >= datetime('now', '-{int(days)} days')"
+        sql += f" AND sent_at >= datetime('now', '+330 minutes', '-{int(days)} days')"
     with get_db() as db:
         return db.execute(sql, params).fetchone()["c"]
 
@@ -466,10 +466,10 @@ def get_failed_messages(batch_id):
 def get_today_stats():
     with get_db() as db:
         sent = db.execute(
-            "SELECT COUNT(*) as c FROM messages WHERE status='sent' AND date(sent_at)=date('now')"
+            "SELECT COUNT(*) as c FROM messages WHERE status='sent' AND date(sent_at)=date('now', '+330 minutes')"
         ).fetchone()["c"]
         failed = db.execute(
-            "SELECT COUNT(*) as c FROM messages WHERE status='failed' AND date(sent_at)=date('now')"
+            "SELECT COUNT(*) as c FROM messages WHERE status='failed' AND date(sent_at)=date('now', '+330 minutes')"
         ).fetchone()["c"]
     cost_per = float(get_setting("cost_per_message", "0.12"))
     return {"sent": sent, "failed": failed, "cost": round(sent * cost_per, 2)}
@@ -479,11 +479,11 @@ def get_month_stats():
     with get_db() as db:
         sent = db.execute(
             "SELECT COUNT(*) as c FROM messages WHERE status='sent' "
-            "AND strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now')"
+            "AND strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now', '+330 minutes')"
         ).fetchone()["c"]
         failed = db.execute(
             "SELECT COUNT(*) as c FROM messages WHERE status='failed' "
-            "AND strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now')"
+            "AND strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now', '+330 minutes')"
         ).fetchone()["c"]
     cost_per = float(get_setting("cost_per_message", "0.12"))
     wap_cost = float(get_setting("wapsolution_monthly_cost", "2000"))
@@ -505,7 +505,7 @@ def get_chart_data(days=7):
                        SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) as sent,
                        SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
                 FROM messages
-                WHERE sent_at >= date('now', '-{int(days)} days')
+                WHERE sent_at >= date('now', '+330 minutes', '-{int(days)} days')
                 GROUP BY date(sent_at)
                 ORDER BY day"""
         ).fetchall()
@@ -556,7 +556,7 @@ def get_due_jobs():
     with get_db() as db:
         return db.execute(
             "SELECT * FROM scheduled_jobs WHERE status='pending' "
-            "AND datetime(scheduled_for) <= datetime('now') ORDER BY scheduled_for"
+            "AND datetime(scheduled_for) <= datetime('now', '+330 minutes') ORDER BY scheduled_for"
         ).fetchall()
 
 

@@ -12,7 +12,7 @@
     <form method="POST" enctype="multipart/form-data" id="uploadForm">
 
       {# File input is OUTSIDE the drop-zone so base.html's zone click handler ignores it #}
-      <input type="file" name="csv_file" id="csvFile" accept=".csv,.txt,.tsv" multiple style="display:none;">
+      <input type="file" name="csv_file" id="csvFile" multiple style="display:none;">
 
       <!-- Drop zone (drag & drop only — no accidental click-to-open) -->
       <div class="drop-zone" id="dropZone" style="margin-bottom:20px;cursor:default;">

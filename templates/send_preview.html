@@ -72,6 +72,13 @@
         </select>
         <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:6px;">Preview</div>
         <pre style="font-size:11.5px;color:#bbb;white-space:pre-wrap;line-height:1.6;margin:0;max-height:140px;overflow-y:auto;" id="tplBody">{% if default_tpl %}{{ default_tpl.body }}{% endif %}</pre>
+
+        <!-- Variable values for this batch -->
+        <div id="varOverrideSection" style="margin-top:14px;display:none;border-top:1px solid var(--border);padding-top:12px;">
+          <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:8px;">Variable values</div>
+          <div id="varOverrideFields"></div>
+          <div style="font-size:10.5px;color:#666;line-height:1.5;margin-top:2px;">Leave auto fields blank to use each passenger's own data. Fill amber fields with one value used for everyone.</div>
+        </div>
       </div>
 
       <!-- Send now button -->
@@ -84,6 +91,7 @@
       <form method="POST" action="{{ url_for('send_start') }}" id="sendForm">
         <input type="hidden" name="template_name" id="hiddenTpl" value="{{ default_tpl.name if default_tpl else '' }}">
         <input type="hidden" name="passengers_json" id="passengersJson" value="">
+        <input type="hidden" name="var_overrides" id="sendVarOverrides" value="">
         {% if needs_confirm %}<input type="hidden" name="confirmed" value="yes">{% endif %}
         <button type="button" onclick="submitSend()" class="btn btn-primary" style="width:100%;justify-content:center;font-size:14px;padding:12px;margin-bottom:8px;" id="sendBtn">
           🚀 Send to <span id="btnCount">{{ pending.stats.ready }}</span> passengers
@@ -92,8 +100,11 @@
 
       <!-- Schedule -->
       <button type="button" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:13px;" id="scheduleToggle">⏰ Schedule Later</button>
-      <form method="POST" action="{{ url_for('send_schedule') }}" id="scheduleForm" style="display:none;margin-top:10px;">
+      <form method="POST" action="{{ url_for('send_schedule') }}" id="scheduleForm"
+            style="display:none;margin-top:10px;" onsubmit="return prepareSchedule()">
         <input type="hidden" name="template_name" id="scheduleTpl" value="{{ default_tpl.name if default_tpl else '' }}">
+        <input type="hidden" name="passengers_json" id="schedulePassengersJson" value="">
+        <input type="hidden" name="var_overrides" id="scheduleVarOverrides" value="">
         <label class="input-label" style="margin-top:8px;">Date & Time</label>
         <input type="datetime-local" name="scheduled_for" class="input" style="margin-bottom:8px;" id="scheduleDt">
         <button type="submit" class="btn btn-ghost" style="width:100%;justify-content:center;font-size:12px;">📅 Confirm Schedule</button>
@@ -172,9 +183,57 @@
 <script>
 // ── Template data ──
 const tplMap = {};
+const tplVarCount = {};
 {% for t in templates %}
   tplMap[{{ t.name|tojson }}] = {{ t.body|tojson }};
+  tplVarCount[{{ t.name|tojson }}] = {{ (t.variable_count or 0)|tojson }};
 {% endfor %}
+
+// Variables 1-3 auto-map to passenger data; 4+ need a fixed value
+const AUTO_LABELS = { 1: 'Passenger Name', 2: 'Route', 3: 'Platform' };
+
+function renderVarInputs(tplName) {
+  const section = document.getElementById('varOverrideSection');
+  const wrap = document.getElementById('varOverrideFields');
+  const n = tplVarCount[tplName] || 0;
+  if (!n) { section.style.display = 'none'; wrap.innerHTML = ''; return; }
+  let html = '';
+  for (let i = 1; i <= n; i++) {
+    const auto = AUTO_LABELS[i];
+    if (auto) {
+      html += '<div style="margin-bottom:8px;">' +
+        '<label class="input-label" style="font-size:10px;">Variable ' + i + ' — ' + auto + '</label>' +
+        '<input type="text" class="input var-ov" data-vi="' + i + '" placeholder="Auto: each passenger\'s ' + auto.toLowerCase() + '" style="font-size:12px;padding:6px 8px;">' +
+        '</div>';
+    } else {
+      html += '<div style="margin-bottom:8px;">' +
+        '<label class="input-label" style="font-size:10px;color:var(--amber);">Variable ' + i + ' — Fixed value (required)</label>' +
+        '<input type="text" class="input var-ov" data-vi="' + i + '" placeholder="One value used for all messages" style="font-size:12px;padding:6px 8px;border-color:rgba(245,158,11,0.4);">' +
+        '</div>';
+    }
+  }
+  wrap.innerHTML = html;
+  section.style.display = '';
+}
+
+function collectVarOverrides() {
+  const ov = {};
+  document.querySelectorAll('.var-ov').forEach(function(inp) {
+    const v = inp.value.trim();
+    if (v) ov[inp.dataset.vi] = v;
+  });
+  return JSON.stringify(ov);
+}
+
+function missingFixedVars(tplName) {
+  const n = tplVarCount[tplName] || 0;
+  const missing = [];
+  for (let i = 4; i <= n; i++) {
+    const inp = document.querySelector('.var-ov[data-vi="' + i + '"]');
+    if (!inp || !inp.value.trim()) missing.push(i);
+  }
+  return missing;
+}
 
 const costPerMsg = {{ (estimated_cost / pending.stats.ready)|round(4) if pending.stats.ready else 0.12 }};
 const delayPerMsg = {{ estimated_mins * 60 / pending.stats.ready if pending.stats.ready else 1.5 }};
@@ -187,7 +246,14 @@ document.getElementById('tplSelect')?.addEventListener('change', function() {
   document.getElementById('tplBody').textContent = tplMap[this.value] || '';
   document.getElementById('hiddenTpl').value = this.value;
   document.getElementById('scheduleTpl').value = this.value;
+  renderVarInputs(this.value);
 });
+
+// Render variable inputs for the initially-selected template
+(function() {
+  const sel = document.getElementById('tplSelect');
+  if (sel) renderVarInputs(sel.value);
+})();
 
 // ── Inline editing ──
 document.querySelectorAll('.editable').forEach(el => {
@@ -280,12 +346,43 @@ function submitSend() {
     if (!confirm(`Send to ${selected.length} passengers? This will take ~${(selected.length * delayPerMsg / 60).toFixed(1)} minutes.`)) return;
   }
 
+  const tplName = document.getElementById('tplSelect').value;
+  const miss = missingFixedVars(tplName);
+  if (miss.length) {
+    alert('Please fill the fixed value for variable(s): ' + miss.join(', '));
+    return;
+  }
+
   document.getElementById('passengersJson').value = JSON.stringify(selected);
-  document.getElementById('hiddenTpl').value = document.getElementById('tplSelect').value;
+  document.getElementById('sendVarOverrides').value = collectVarOverrides();
+  document.getElementById('hiddenTpl').value = tplName;
   const btn = document.getElementById('sendBtn');
   btn.disabled = true;
   btn.innerHTML = '⏳ Starting…';
   document.getElementById('sendForm').submit();
+}
+
+// ── Schedule: populate passengers before submit ──
+function prepareSchedule() {
+  const selected = [];
+  document.querySelectorAll('#passengerBody .pax-row').forEach(row => {
+    const cb = row.querySelector('.pax-check');
+    if (cb.checked) selected.push(passengers[parseInt(row.dataset.idx)]);
+  });
+  if (selected.length === 0) {
+    alert('No passengers selected!');
+    return false;
+  }
+  const tplName = document.getElementById('tplSelect').value;
+  const miss = missingFixedVars(tplName);
+  if (miss.length) {
+    alert('Please fill the fixed value for variable(s): ' + miss.join(', '));
+    return false;
+  }
+  document.getElementById('schedulePassengersJson').value = JSON.stringify(selected);
+  document.getElementById('scheduleVarOverrides').value = collectVarOverrides();
+  document.getElementById('scheduleTpl').value = tplName;
+  return true;
 }
 
 // ── Schedule toggle ──
