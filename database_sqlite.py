@@ -154,7 +154,10 @@ def init_db():
             wa_message_id TEXT,
             timestamp TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
             read INTEGER NOT NULL DEFAULT 0,
-            status TEXT
+            status TEXT,
+            media_path TEXT,
+            mime_type TEXT,
+            filename TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_messages_batch ON messages(batch_id);
@@ -171,6 +174,13 @@ def init_db():
         cols = {r["name"] for r in db.execute("PRAGMA table_info(scheduled_jobs)").fetchall()}
         if "var_overrides" not in cols:
             db.execute("ALTER TABLE scheduled_jobs ADD COLUMN var_overrides TEXT DEFAULT ''")
+
+    # Migration: add media columns to older chats tables
+    with get_db() as db:
+        cols = {r["name"] for r in db.execute("PRAGMA table_info(chats)").fetchall()}
+        for col in ("media_path", "mime_type", "filename"):
+            if col not in cols:
+                db.execute(f"ALTER TABLE chats ADD COLUMN {col} TEXT")
 
     # Seed default admin if no users exist
     with get_db() as db:
@@ -609,14 +619,17 @@ def delete_scheduled_job(job_id):
 # ---------------- Chat / Inbox ----------------
 
 def save_chat_message(phone, customer_name, direction, content,
-                       wa_message_id=None, message_type="text", status=None):
+                       wa_message_id=None, message_type="text", status=None,
+                       media_path=None, mime_type=None, filename=None):
     with get_db() as db:
         cur = db.execute(
             """INSERT INTO chats (phone, customer_name, direction, content,
-               wa_message_id, message_type, read, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               wa_message_id, message_type, read, status,
+               media_path, mime_type, filename)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (phone, customer_name, direction, content,
-             wa_message_id, message_type, 1 if direction == "out" else 0, status),
+             wa_message_id, message_type, 1 if direction == "out" else 0, status,
+             media_path, mime_type, filename),
         )
         return cur.lastrowid
 

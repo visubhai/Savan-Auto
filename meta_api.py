@@ -118,6 +118,39 @@ class WhatsAppAPI:
         except Exception as e:
             return False, str(e)
 
+    def download_media(self, media_id):
+        """Download an incoming media file by its media_id.
+
+        Two-step: GET /{media_id} → temporary URL, then GET that URL with
+        the bearer token. Returns (bytes, mime_type) or (None, None) on
+        any failure. Meta's URL expires in ~5 minutes so download must
+        happen synchronously during webhook handling.
+        """
+        if not self.token or not media_id:
+            return None, None
+        try:
+            r = requests.get(
+                f"{self.base_url}/{media_id}",
+                headers=self.headers, timeout=15,
+            )
+            if r.status_code != 200:
+                return None, None
+            meta = r.json()
+            url = meta.get("url")
+            mime = meta.get("mime_type") or ""
+            if not url:
+                return None, None
+            r2 = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {self.token}"},
+                timeout=30,
+            )
+            if r2.status_code != 200:
+                return None, None
+            return r2.content, mime
+        except Exception:
+            return None, None
+
     def fetch_templates(self):
         """Fetch all approved templates from Meta and sync to DB."""
         if not self.token or not self.waba_id:

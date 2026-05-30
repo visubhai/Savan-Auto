@@ -29,6 +29,38 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB
 TEMP_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
+# Incoming WhatsApp media (images, audio, video, documents) is saved here.
+# Note: on Render free tier this disk is ephemeral and wiped on redeploy.
+MEDIA_DIR = os.path.join(TEMP_DIR, "media")
+os.makedirs(MEDIA_DIR, exist_ok=True)
+
+
+# Maps MIME types we expect from WhatsApp to safe file extensions
+_MIME_EXT = {
+    "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png",
+    "image/webp": ".webp", "image/gif": ".gif",
+    "audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+    "audio/amr": ".amr", "audio/aac": ".aac",
+    "video/mp4": ".mp4", "video/3gpp": ".3gp",
+    "application/pdf": ".pdf",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "text/plain": ".txt",
+}
+
+
+def _ext_for_mime(mime):
+    """Best-effort file extension for a MIME type from WhatsApp."""
+    if not mime:
+        return ".bin"
+    base = mime.split(";")[0].strip().lower()
+    if base in _MIME_EXT:
+        return _MIME_EXT[base]
+    import mimetypes
+    return mimetypes.guess_extension(base) or ".bin"
+
 # Custom Jinja filters
 @app.template_filter("from_json")
 def from_json_filter(s):
@@ -912,22 +944,29 @@ def webhook_receive():
                     wa_id = msg.get("id", "")
                     msg_type = msg.get("type", "text")
 
-                    # Extract text content
+                    media_id = None
+                    mime_type = None
+                    filename = None
+                    caption = ""
+                    content = ""
+
                     if msg_type == "text":
                         content = msg.get("text", {}).get("body", "")
-                    elif msg_type == "image":
-                        content = "[Image]"
-                    elif msg_type == "audio":
-                        content = "[Voice message]"
-                    elif msg_type == "video":
-                        content = "[Video]"
-                    elif msg_type == "document":
-                        content = f"[Document: {msg.get('document',{}).get('filename','')}]"
+                    elif msg_type in ("image", "audio", "video", "document", "sticker"):
+                        block = msg.get(msg_type, {}) or {}
+                        media_id  = block.get("id")
+                        mime_type = block.get("mime_type")
+                        caption   = block.get("caption", "") or ""
+                        if msg_type == "document":
+                            filename = block.get("filename") or ""
+                        content = caption or {
+                            "image": "[Image]", "audio": "[Voice message]",
+                            "video": "[Video]", "document": f"[Document: {filename or ''}]",
+                            "sticker": "[Sticker]",
+                        }[msg_type]
                     elif msg_type == "location":
                         loc = msg.get("location", {})
                         content = f"[Location: {loc.get('latitude')}, {loc.get('longitude')}]"
-                    elif msg_type == "sticker":
-                        content = "[Sticker]"
                     else:
                         content = f"[{msg_type}]"
 
@@ -935,9 +974,29 @@ def webhook_receive():
                     contacts = value.get("contacts", [])
                     name = contacts[0].get("profile", {}).get("name", "") if contacts else ""
 
+                    # Download media now — Meta's URL expires in ~5 minutes
+                    media_path = None
+                    if media_id:
+                        try:
+                            api = WhatsAppAPI()
+                            data, dl_mime = api.download_media(media_id)
+                            if data:
+                                if not mime_type:
+                                    mime_type = dl_mime
+                                ext = _ext_for_mime(mime_type)
+                                safe_id = "".join(c for c in (wa_id or media_id) if c.isalnum() or c in "._-")
+                                rel_name = f"{safe_id}{ext}"
+                                full_path = os.path.join(MEDIA_DIR, rel_name)
+                                with open(full_path, "wb") as fh:
+                                    fh.write(data)
+                                media_path = rel_name
+                        except Exception as e:
+                            app.logger.error(f"Media download failed for {media_id}: {e}")
+
                     db.save_chat_message(
                         phone, name or None, "in", content,
                         wa_message_id=wa_id, message_type=msg_type,
+                        media_path=media_path, mime_type=mime_type, filename=filename,
                     )
 
                 # ── Status updates (sent → delivered → read) ───────────────
@@ -1099,6 +1158,41 @@ def inbox_poll():
 @login_required
 def inbox_unread():
     return jsonify({"count": db.get_unread_count()})
+
+
+@app.route("/media/<int:chat_id>")
+@login_required
+def serve_media(chat_id):
+    """Serve a customer-sent media file (image, audio, video, document)."""
+    # Look up the chat record across whichever backend is active.
+    chat = None
+    if hasattr(db, "_db"):  # MongoDB backend exposes _db / _clean
+        try:
+            chat = db._clean(db._db().chats.find_one({"id": int(chat_id)}))
+        except Exception:
+            chat = None
+    elif hasattr(db, "get_db"):  # SQLite fallback exposes a get_db() context manager
+        try:
+            with db.get_db() as conn:
+                row = conn.execute(
+                    "SELECT * FROM chats WHERE id=?", (int(chat_id),)
+                ).fetchone()
+                chat = dict(row) if row else None
+        except Exception:
+            chat = None
+
+    if not chat or not chat.get("media_path"):
+        abort(404)
+    full = os.path.join(MEDIA_DIR, chat["media_path"])
+    if not os.path.exists(full):
+        abort(404)
+
+    return send_file(
+        full,
+        mimetype=chat.get("mime_type") or "application/octet-stream",
+        as_attachment=False,
+        download_name=(chat.get("filename") or chat["media_path"]),
+    )
 
 
 # ---------------- Error handlers ----------------

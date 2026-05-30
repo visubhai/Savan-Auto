@@ -59,6 +59,14 @@
   .msg-row.bulk .bubble { background:#1f2a3a; color:#9bb4d0; border:1px dashed #3a4a5a; font-style:italic; }
   .msg-row.bulk.out .bubble { border-bottom-right-radius:14px; }
 
+  /* Media bubbles */
+  .bubble-img    { max-width:260px; max-height:320px; border-radius:10px; display:block; cursor:zoom-in; }
+  .bubble-audio  { display:block; max-width:260px; }
+  .bubble-video  { display:block; max-width:260px; max-height:320px; border-radius:10px; background:#000; }
+  .bubble-doc    { display:inline-flex; align-items:center; gap:6px; color:var(--amber); text-decoration:none; padding:8px 10px; background:rgba(245,158,11,0.08); border-radius:8px; }
+  .bubble-doc:hover { background:rgba(245,158,11,0.14); }
+  .bubble-caption{ margin-top:6px; font-size:13px; color:#ddd; }
+
   /* "Open chat with this number" suggestion under the conv-list search */
   .phone-suggest { padding:10px 14px; border-bottom:1px solid var(--border); background:#0e0e0e; }
   .phone-suggest a { display:flex; align-items:center; gap:10px; padding:8px 10px; background:#1a2a1a; border:1px solid #2a4a2a; border-radius:8px; color:#8bc34a; font-size:12.5px; text-decoration:none; }
@@ -152,7 +160,28 @@
           {% endif %}
           <div class="msg-row {{ m.direction }}{% if m.is_bulk %} bulk{% endif %}" data-id="{{ m.id }}">
             <div class="bubble">
-              {{ m.content }}
+              {% if m.media_path %}
+                {% if m.message_type in ['image', 'sticker'] %}
+                  <a href="{{ url_for('serve_media', chat_id=m.id) }}" target="_blank">
+                    <img src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-img">
+                  </a>
+                  {% if m.content and not m.content.startswith('[') %}
+                    <div class="bubble-caption">{{ m.content }}</div>
+                  {% endif %}
+                {% elif m.message_type == 'audio' %}
+                  <audio controls src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-audio"></audio>
+                {% elif m.message_type == 'video' %}
+                  <video controls src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-video"></video>
+                {% elif m.message_type == 'document' %}
+                  <a href="{{ url_for('serve_media', chat_id=m.id) }}" target="_blank" class="bubble-doc">
+                    📄 {{ m.filename or 'Document' }}
+                  </a>
+                {% else %}
+                  {{ m.content }}
+                {% endif %}
+              {% else %}
+                {{ m.content }}
+              {% endif %}
               <span class="bubble-time">
                 {{ m.timestamp[11:16] if m.timestamp else '' }}
                 {% if m.direction == 'out' %}
@@ -276,7 +305,28 @@ function appendBubble(m) {
   if (m.direction === 'out') {
     statusIcon = m.status === 'read' ? ' ✓✓' : m.status === 'delivered' ? ' ✓✓' : m.status === 'sent' ? ' ✓' : ' ⏳';
   }
-  row.innerHTML = '<div class="bubble">' + escHtml(m.content)
+  var body;
+  if (m.media_path) {
+    var src = '/media/' + m.id;
+    var t = m.message_type;
+    if (t === 'image' || t === 'sticker') {
+      body = '<a href="' + src + '" target="_blank"><img src="' + src + '" class="bubble-img"></a>';
+      if (m.content && m.content.charAt(0) !== '[') {
+        body += '<div class="bubble-caption">' + escHtml(m.content) + '</div>';
+      }
+    } else if (t === 'audio') {
+      body = '<audio controls src="' + src + '" class="bubble-audio"></audio>';
+    } else if (t === 'video') {
+      body = '<video controls src="' + src + '" class="bubble-video"></video>';
+    } else if (t === 'document') {
+      body = '<a href="' + src + '" target="_blank" class="bubble-doc">📄 ' + escHtml(m.filename || 'Document') + '</a>';
+    } else {
+      body = escHtml(m.content);
+    }
+  } else {
+    body = escHtml(m.content);
+  }
+  row.innerHTML = '<div class="bubble">' + body
     + '<span class="bubble-time">' + time + statusIcon + '</span></div>';
   container.appendChild(row);
   container.scrollTop = container.scrollHeight;

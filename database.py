@@ -547,7 +547,8 @@ else:
     # ── Chat / Inbox ──────────────────────────────────────────────────────────
 
     def save_chat_message(phone, customer_name, direction, content,
-                           wa_message_id=None, message_type="text", status=None):
+                           wa_message_id=None, message_type="text", status=None,
+                           media_path=None, mime_type=None, filename=None):
         msg_id = _next_id("chats")
         _db().chats.insert_one({
             "id": msg_id,
@@ -560,6 +561,9 @@ else:
             "timestamp": _now(),
             "read": 1 if direction == "out" else 0,
             "status": status,
+            "media_path": media_path,
+            "mime_type": mime_type,
+            "filename": filename,
         })
         return msg_id
 
