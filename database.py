@@ -34,7 +34,7 @@ if not MONGO_URI:
         create_batch, update_batch_counts, complete_batch,
         get_batch, list_batches,
         log_message, search_messages, count_messages,
-        get_batch_messages, get_failed_messages,
+        get_batch_messages, get_failed_messages, get_phone_messages,
         get_today_stats, get_month_stats, get_chart_data,
         get_recent_sends, get_top_routes,
         create_scheduled_job, list_scheduled_jobs,
@@ -436,6 +436,16 @@ else:
     def get_failed_messages(batch_id):
         return _clean_many(
             _db().messages.find({"batch_id": int(batch_id), "status": "failed"}).sort("id", ASCENDING)
+        )
+
+    def get_phone_messages(phone, limit=200):
+        """Bulk/template messages sent to this phone, oldest first.
+        Used in the inbox to show template sends alongside chat messages.
+        """
+        return _clean_many(
+            _db().messages.find({"customer_phone": phone})
+            .sort("sent_at", ASCENDING)
+            .limit(limit)
         )
 
     # ── Dashboard stats ───────────────────────────────────────────────────────

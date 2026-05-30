@@ -955,21 +955,64 @@ def webhook_receive():
 @login_required
 def inbox():
     conversations = db.list_conversations(50)
-    active_phone  = request.args.get("phone", "")
+    raw_phone     = request.args.get("phone", "").strip()
+    active_phone  = ""
+    if raw_phone:
+        from parsers import clean_phone as _cp
+        cleaned = _cp(raw_phone)
+        # Accept either a clean E.164 or pass through as-is if user typed
+        # an already-formatted phone (e.g. 919..., 12 digits).
+        active_phone = cleaned or raw_phone
+
     messages      = []
     customer_name = ""
+    templates     = [dict(t) for t in db.get_templates()] if active_phone else []
     if active_phone:
-        messages = [dict(m) for m in db.get_conversation(active_phone, 100)]
+        # Real two-way chat messages
+        chats = [dict(m) for m in db.get_conversation(active_phone, 200)]
+        # Bulk template sends to this phone (presented as outgoing bubbles)
+        bulk = [dict(m) for m in db.get_phone_messages(active_phone, 200)]
+        for b in bulk:
+            messages.append({
+                "id": f"b{b.get('id')}",     # distinct id space from chats
+                "direction": "out",
+                "content": f"📋 Sent template: {b.get('template_name','')}",
+                "timestamp": b.get("sent_at"),
+                "status": b.get("status"),
+                "customer_name": b.get("customer_name"),
+                "message_type": "template",
+                "is_bulk": True,
+            })
+        for c in chats:
+            c["is_bulk"] = False
+            messages.append(c)
+        # Chronological merge
+        messages.sort(key=lambda m: m.get("timestamp") or "")
         db.mark_read(active_phone)
-        # Resolve name
-        if messages:
-            customer_name = messages[-1].get("customer_name") or active_phone
+        # Best-effort customer name (latest with a name wins)
+        for m in reversed(messages):
+            n = m.get("customer_name")
+            if n:
+                customer_name = n
+                break
+        if not customer_name:
+            customer_name = active_phone
+
+    # Last numeric chat id, used by JS for polling (bulk-only history → 0)
+    last_chat_id = 0
+    for m in messages:
+        mid = m.get("id")
+        if isinstance(mid, int) and mid > last_chat_id:
+            last_chat_id = mid
+
     conversations = [dict(c) for c in conversations]
     return render_template("inbox.html",
                            conversations=conversations,
                            active_phone=active_phone,
                            messages=messages,
-                           customer_name=customer_name)
+                           customer_name=customer_name,
+                           templates=templates,
+                           last_chat_id=last_chat_id)
 
 
 @app.route("/api/inbox/send", methods=["POST"])
@@ -992,6 +1035,53 @@ def inbox_send():
         )
         return jsonify({"ok": True, "id": msg_id})
     return jsonify({"ok": False, "error": result}), 400
+
+
+@app.route("/api/inbox/send-template", methods=["POST"])
+@login_required
+def inbox_send_template():
+    """Send an approved template to a phone from the Inbox.
+
+    Body: { phone, template_name, params: [str, ...] (optional) }
+    Used to initiate a chat when the 24-hour reply window is closed.
+    """
+    data = request.get_json(silent=True) or {}
+    phone = (data.get("phone") or "").strip()
+    tpl_name = (data.get("template_name") or "").strip()
+    params_in = data.get("params") or []
+    if not phone or not tpl_name:
+        return jsonify({"ok": False, "error": "phone and template_name required"}), 400
+
+    from parsers import clean_phone as _cp
+    phone_clean = _cp(phone) or phone
+
+    tpl = db.get_template_by_name(tpl_name)
+    if not tpl:
+        return jsonify({"ok": False, "error": "template not found"}), 404
+    tpl = dict(tpl)
+    if (tpl.get("status") or "").lower() not in ("approved", "active"):
+        return jsonify({"ok": False, "error": f"template not approved (status: {tpl.get('status')})"}), 400
+
+    # Build positional params, padding with "—" if user supplied fewer.
+    var_count = int(tpl.get("variable_count") or 0)
+    params = [str(p).strip() for p in params_in][:var_count]
+    while len(params) < var_count:
+        params.append("—")
+
+    api = WhatsAppAPI()
+    if not api.is_configured():
+        return jsonify({"ok": False, "error": "WhatsApp API not configured"}), 400
+    ok, result = api.send_template(phone_clean, tpl_name, tpl["language"], params)
+    if not ok:
+        return jsonify({"ok": False, "error": result}), 400
+
+    # Log into the chat thread so it appears in the conversation timeline.
+    msg_id = db.save_chat_message(
+        phone_clean, None, "out",
+        f"📋 Sent template: {tpl_name}",
+        wa_message_id=result, message_type="template", status="sent",
+    )
+    return jsonify({"ok": True, "id": msg_id})
 
 
 @app.route("/api/inbox/messages")

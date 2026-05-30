@@ -479,6 +479,17 @@ def get_failed_messages(batch_id):
         ).fetchall()
 
 
+def get_phone_messages(phone, limit=200):
+    """Bulk/template messages sent to this phone, oldest first.
+    Used in the inbox to show template sends alongside chat messages.
+    """
+    with get_db() as db:
+        return db.execute(
+            "SELECT * FROM messages WHERE customer_phone=? ORDER BY sent_at ASC LIMIT ?",
+            (phone, limit),
+        ).fetchall()
+
+
 # ---------------- Dashboard stats ----------------
 def get_today_stats():
     with get_db() as db:
