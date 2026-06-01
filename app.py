@@ -1019,12 +1019,12 @@ def webhook_receive():
                                 rel_name = f"{safe_id}{ext}"
 
                                 if storage.is_configured():
-                                    key = storage.upload_bytes(rel_name, data, mime_type)
-                                    if key:
-                                        media_path = key
-                                        storage_kind = "r2"
+                                    used = storage.upload_bytes(rel_name, data, mime_type)
+                                    if used:
+                                        media_path = rel_name
+                                        storage_kind = used   # 'r2' or 'gridfs'
                                 if not media_path:
-                                    # Local fallback (also covers R2 upload failure)
+                                    # Local fallback (also covers persistent-upload failure)
                                     full_path = os.path.join(MEDIA_DIR, rel_name)
                                     with open(full_path, "wb") as fh:
                                         fh.write(data)
@@ -1242,25 +1242,36 @@ def serve_media(chat_id):
     if not chat or not chat.get("media_path"):
         abort(404)
 
-    # If the file lives in Cloudflare R2, redirect to a short-lived signed URL
-    # so the browser fetches the bytes directly (no Render bandwidth cost).
-    if chat.get("storage_kind") == "r2" and storage.is_configured():
-        url = storage.signed_url(
-            chat["media_path"],
-            filename=chat.get("filename") or chat["media_path"],
-        )
+    kind  = chat.get("storage_kind") or "local"
+    name  = chat.get("filename") or chat["media_path"]
+    mime  = chat.get("mime_type") or "application/octet-stream"
+
+    # Cloudflare R2 → redirect to short-lived signed URL (browser fetches direct)
+    if kind == "r2" and storage.is_r2_configured():
+        url = storage.signed_url(chat["media_path"], filename=name)
         if url:
             return redirect(url)
 
-    # Local file
+    # MongoDB GridFS → proxy bytes through Flask (no public URL)
+    if kind == "gridfs" and storage.is_gridfs_configured():
+        data, gf_mime = storage.gridfs_read(chat["media_path"])
+        if data:
+            return send_file(
+                io.BytesIO(data),
+                mimetype=gf_mime or mime,
+                as_attachment=False,
+                download_name=name,
+            )
+
+    # Local file (also covers fallback if a remote backend failed to read)
     full = os.path.join(MEDIA_DIR, chat["media_path"])
     if not os.path.exists(full):
         abort(404)
     return send_file(
         full,
-        mimetype=chat.get("mime_type") or "application/octet-stream",
+        mimetype=mime,
         as_attachment=False,
-        download_name=(chat.get("filename") or chat["media_path"]),
+        download_name=name,
     )
 
 
