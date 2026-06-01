@@ -119,8 +119,71 @@
     <input type="text" name="business_name" value="{{ settings.business_name }}" class="input" style="max-width:320px;">
   </div>
 
+  <!-- Gmail Auto-Fetch (Review Follow-up) -->
+  <div class="card" style="padding:24px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;">📬 Gmail Auto-Fetch (for Review Follow-up)</div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="testGmail()">🔌 Test connection</button>
+    </div>
+    <div style="font-size:12.5px;color:#666;line-height:1.6;margin-bottom:16px;">
+      Lets the Review Follow-up page auto-fetch RedPro review CSVs from your Gmail.
+      You need 2-Step Verification enabled and a 16-char
+      <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--amber);">App Password</a>
+      (not your Gmail login password).
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+      <div>
+        <label class="input-label">Gmail Address</label>
+        <input type="email" name="gmail_address" value="{{ settings.gmail_address or '' }}"
+               class="input" placeholder="savan.reviews@gmail.com">
+      </div>
+      <div>
+        <label class="input-label">Gmail App Password
+          {% if settings.gmail_app_password %}<span style="color:#4caf50;font-weight:400;">— saved ✓</span>{% endif %}
+        </label>
+        <input type="password" name="gmail_app_password" value="" class="input"
+               placeholder="{% if settings.gmail_app_password %}leave blank to keep saved password{% else %}xxxx xxxx xxxx xxxx{% endif %}">
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div>
+        <label class="input-label">From filter (optional)</label>
+        <input type="text" name="gmail_sender_filter" value="{{ settings.gmail_sender_filter or '' }}"
+               class="input" placeholder="noreply@redbus.com">
+      </div>
+      <div>
+        <label class="input-label">Subject filter (optional)</label>
+        <input type="text" name="gmail_subject_filter" value="{{ settings.gmail_subject_filter or '' }}"
+               class="input" placeholder="Ratings">
+      </div>
+    </div>
+
+    <div id="gmailTestResult" style="margin-top:12px;font-size:12.5px;display:none;"></div>
+  </div>
+
   <button type="submit" class="btn btn-primary" style="font-size:15px;padding:13px 28px;">💾 Save Settings</button>
   </form>
+
+  <script>
+    function testGmail() {
+      var box = document.getElementById('gmailTestResult');
+      box.style.display = '';
+      box.style.color = '#888';
+      box.textContent  = 'Testing…';
+      fetch('/api/settings/gmail-test', { method: 'POST' })
+        .then(function(r){ return r.json(); })
+        .then(function(d) {
+          box.style.color = d.success ? '#4caf50' : '#f87171';
+          box.textContent  = (d.success ? '✓ ' : '✗ ') + d.message;
+        })
+        .catch(function(e) {
+          box.style.color = '#f87171';
+          box.textContent = '✗ ' + e.message;
+        });
+    }
+  </script>
 
   <!-- Change Password (separate form) -->
   <div class="card" style="padding:24px;margin-top:16px;">

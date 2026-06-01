@@ -17,10 +17,11 @@ from flask import (
 # `redirect` is already imported above — used by serve_media for R2.
 
 import database as db
-from parsers import auto_parse, extract_all_phones
+from parsers import auto_parse, extract_all_phones, parse_review_export
 from meta_api import WhatsAppAPI
 import scheduler
 import storage
+import gmail_fetch
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "savan-travels-localhost-secret-2024")
@@ -709,12 +710,16 @@ def settings():
             "access_token", "phone_number_id", "waba_id", "api_version",
             "delay_between_messages", "max_retries", "cost_per_message",
             "wapsolution_monthly_cost", "business_name",
+            # Gmail auto-fetch (Review Follow-up)
+            "gmail_address", "gmail_app_password",
+            "gmail_sender_filter", "gmail_subject_filter",
         ]
         for k in keys:
             v = request.form.get(k)
             if v is not None:
-                if k == "access_token" and not v.strip():
-                    continue  # Don't wipe existing token
+                # Don't wipe stored secrets when the field is submitted blank
+                if k in ("access_token", "gmail_app_password") and not v.strip():
+                    continue
                 db.set_setting(k, v.strip())
         flash("✓ Settings saved successfully", "success")
         return redirect(url_for("settings"))
@@ -913,6 +918,139 @@ def campaigns_send(campaign_id):
         return redirect(url_for("send_progress", batch_id=batch_id))
 
     return render_template("campaign_send.html", campaign=camp, template=template)
+
+
+# ---------------- Review Follow-up ----------------
+#
+# Workflow:
+#   1. RedPro emails a "RnR" (Ratings & Reviews) CSV to your Gmail —
+#      OR you upload it directly.
+#   2. App parses it, gets the set of phones that DID review.
+#   3. App fetches recent bulk-send recipients from the messages table.
+#   4. Non-reviewers = recent recipients minus reviewers.
+#   5. Non-reviewers are loaded into the existing Send Preview page so you
+#      pick a follow-up template (e.g. review_followup) and send / schedule.
+
+@app.route("/reviews", methods=["GET"])
+@login_required
+def reviews():
+    return render_template(
+        "reviews.html",
+        gmail_configured=gmail_fetch.is_configured(),
+        gmail_address=db.get_setting("gmail_address", ""),
+        gmail_sender_filter=db.get_setting("gmail_sender_filter", ""),
+        gmail_subject_filter=db.get_setting("gmail_subject_filter", ""),
+        default_lookback=db.get_setting("review_lookback_days", "14"),
+    )
+
+
+def _handle_review_csv(content, source_label):
+    """Shared logic for both manual upload and Gmail-fetched CSVs."""
+    parsed = parse_review_export(content, source_label)
+    days = _safe_int(request.form.get("lookback_days", db.get_setting("review_lookback_days", "14")),
+                     default=14, minimum=1)
+    db.set_setting("review_lookback_days", str(days))
+
+    recent     = db.get_recent_recipients(days=days, status="sent")
+    reviewers  = parsed["reviewers"]
+    non_review = [r for r in recent if r.get("phone") and r["phone"] not in reviewers]
+
+    if not non_review:
+        flash(
+            f"✓ {len(reviewers)} reviewers found from '{source_label}'. "
+            f"Everyone we sent to in the last {days} days has already reviewed — nothing to follow up on.",
+            "info",
+        )
+        return redirect(url_for("reviews"))
+
+    pending = {
+        "passengers": [
+            {
+                "phone":    r["phone"],
+                "name":     r.get("name") or "Customer",
+                "route":    r.get("route") or "",
+                "platform": r.get("platform") or "",
+            }
+            for r in non_review
+        ],
+        "stats": {
+            "total_rows": parsed["total_rows"],
+            "cancelled":  parsed.get("skipped_no_phone", 0),
+            "duplicates": 0,
+            "invalid":    parsed.get("skipped_invalid_phone", 0),
+            "opted_out":  0,
+            "ready":      len(non_review),
+        },
+        "filename": f"Follow-up · {source_label} · {len(non_review)} non-reviewers (last {days}d)",
+    }
+    key = save_pending(pending)
+    session["pending_key"] = key
+    flash(
+        f"✓ {len(reviewers)} reviewed · {len(non_review)} did not. "
+        f"Pick a follow-up template below and send.",
+        "success",
+    )
+    return redirect(url_for("send_preview"))
+
+
+@app.route("/reviews/upload", methods=["POST"])
+@login_required
+def reviews_upload():
+    files = request.files.getlist("review_file")
+    files = [f for f in files if f.filename]
+    if not files:
+        flash("Please pick a CSV file to upload", "error")
+        return redirect(url_for("reviews"))
+    f = files[0]
+    try:
+        content = f.read()
+    except Exception as e:
+        flash(f"Failed to read file: {e}", "error")
+        return redirect(url_for("reviews"))
+    return _handle_review_csv(content, f.filename)
+
+
+@app.route("/reviews/fetch", methods=["POST"])
+@login_required
+def reviews_fetch():
+    """Pull the next unread matching email from Gmail and process its attachment."""
+    if not gmail_fetch.is_configured():
+        flash("Gmail not configured. Add address and App Password in Settings.", "error")
+        return redirect(url_for("reviews"))
+    try:
+        emails = gmail_fetch.fetch_attachments(
+            since_days=_safe_int(request.form.get("lookback_days", "14"), default=14, minimum=1),
+            only_new=True,
+            mark_seen=True,
+        )
+    except Exception as e:
+        flash(f"Gmail fetch failed: {e}", "error")
+        return redirect(url_for("reviews"))
+
+    if not emails:
+        flash("No new matching emails with attachments in Gmail.", "info")
+        return redirect(url_for("reviews"))
+
+    # Process the latest matching email's first CSV/XLSX attachment
+    latest = emails[-1]
+    attach = None
+    for a in latest["attachments"]:
+        name = (a.get("filename") or "").lower()
+        if name.endswith((".csv", ".xlsx", ".xls", ".txt")):
+            attach = a
+            break
+    if not attach:
+        flash(f"Email '{latest.get('subject','')}' had attachments but none were CSV/Excel.", "error")
+        return redirect(url_for("reviews"))
+
+    return _handle_review_csv(attach["content_bytes"], attach["filename"])
+
+
+@app.route("/api/settings/gmail-test", methods=["POST"])
+@login_required
+def settings_gmail_test():
+    ok, msg = gmail_fetch.test_connection()
+    return jsonify({"success": ok, "message": msg})
 
 
 @app.route("/api/campaigns/extract", methods=["POST"])

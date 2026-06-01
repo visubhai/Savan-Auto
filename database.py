@@ -35,6 +35,7 @@ if not MONGO_URI:
         get_batch, list_batches,
         log_message, search_messages, count_messages,
         get_batch_messages, get_failed_messages, get_phone_messages,
+        get_recent_recipients,
         get_today_stats, get_month_stats, get_chart_data,
         get_recent_sends, get_top_routes,
         create_scheduled_job, list_scheduled_jobs,
@@ -447,6 +448,37 @@ else:
             .sort("sent_at", ASCENDING)
             .limit(limit)
         )
+
+    def get_recent_recipients(days=30, template_name=None, status="sent"):
+        """Return one row per unique phone we've successfully sent to in the
+        last `days` days. Each row is the latest message for that phone:
+        { phone, name, route, platform, template_name, sent_at }.
+        Used by the Review Follow-up flow to compute non-reviewers.
+        """
+        cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
+        match = {"sent_at": {"$gte": cutoff}}
+        if status:
+            match["status"] = status
+        if template_name:
+            match["template_name"] = template_name
+        pipeline = [
+            {"$match": match},
+            {"$sort":  {"sent_at": DESCENDING}},
+            {"$group": {
+                "_id":            "$customer_phone",
+                "phone":          {"$first": "$customer_phone"},
+                "name":           {"$first": "$customer_name"},
+                "route":          {"$first": "$route"},
+                "platform":       {"$first": "$platform"},
+                "template_name":  {"$first": "$template_name"},
+                "sent_at":        {"$first": "$sent_at"},
+            }},
+            {"$sort": {"sent_at": DESCENDING}},
+        ]
+        rows = list(_db().messages.aggregate(pipeline))
+        for r in rows:
+            r.pop("_id", None)
+        return rows
 
     # ── Dashboard stats ───────────────────────────────────────────────────────
 

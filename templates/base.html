@@ -247,6 +247,9 @@
     <a href="{{ url_for('campaigns') }}" class="nav-item {% if request.endpoint in ['campaigns','campaigns_send','campaigns_create'] %}active{% endif %}">
       <span class="nav-icon">🎯</span> Bulk Campaign
     </a>
+    <a href="{{ url_for('reviews') }}" class="nav-item {% if request.endpoint in ['reviews','reviews_upload','reviews_fetch'] %}active{% endif %}">
+      <span class="nav-icon">⭐</span> Review Follow-up
+    </a>
     <a href="{{ url_for('inbox') }}" class="nav-item {% if request.endpoint in ['inbox','inbox_send','inbox_poll'] %}active{% endif %}" id="inboxNavItem">
       <span class="nav-icon">💬</span> Inbox
       <span class="badge" id="inboxBadge" style="display:none;">0</span>

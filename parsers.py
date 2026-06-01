@@ -312,6 +312,65 @@ def parse_redbus_csv(text, filename=""):
     }
 
 
+# ── RedBus RnR (Ratings & Reviews) export parser ──────────────────────────────
+def parse_review_export(content, filename=""):
+    """Parse a RedBus 'RnR' CSV export.
+
+    The file only contains rows for passengers who DID submit a review/rating.
+    Each row carries the passenger's phone in the `ContactNumber` column
+    (prefixed with a literal apostrophe + '+' — Excel anti-numeric trick).
+
+    Returns {
+      reviewers: set of cleaned phones (91XXXXXXXXXX) who reviewed,
+      by_phone: dict[phone] -> { name, pnr, route, rating, review, date, platform },
+      total_rows, skipped_no_phone, skipped_invalid_phone,
+    }
+    """
+    text = _decode(content) if isinstance(content, (bytes, bytearray)) else str(content)
+    reader = csv.DictReader(io.StringIO(text))
+    reviewers = set()
+    by_phone = {}
+    total = 0
+    skipped_blank = 0
+    skipped_invalid = 0
+
+    for row in reader:
+        total += 1
+        raw_phone = (row.get("ContactNumber") or "").strip()
+        if not raw_phone:
+            skipped_blank += 1
+            continue
+        # Strip Excel-protection apostrophe and any plus / spaces
+        cleaned_raw = raw_phone.lstrip("'").lstrip("+").strip()
+        phone = clean_phone(cleaned_raw)
+        if not phone:
+            skipped_invalid += 1
+            continue
+        reviewers.add(phone)
+        org = (row.get("OrgUnit") or "").upper()
+        platform = (
+            "RedBus"     if "REDBUS" in org else
+            "MakeMyTrip" if "MMT"    in org else
+            ""
+        )
+        by_phone[phone] = {
+            "name":     clean_name(row.get("Name", "")) or "Customer",
+            "pnr":      (row.get("PNR", "") or "").strip().strip('"'),
+            "route":    clean_route(row.get("Route", "")) or "",
+            "rating":   (row.get("Rating", "") or "").strip(),
+            "review":   (row.get("Review", "") or "").strip(),
+            "date":     (row.get("DateOfRating", "") or "").strip(),
+            "platform": platform,
+        }
+    return {
+        "reviewers": reviewers,
+        "by_phone": by_phone,
+        "total_rows": total,
+        "skipped_no_phone": skipped_blank,
+        "skipped_invalid_phone": skipped_invalid,
+    }
+
+
 # ── Bulk Campaign: extract ALL phone numbers from any file ────────────────────
 def extract_all_phones(content, filename=""):
     """

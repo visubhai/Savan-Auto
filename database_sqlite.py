@@ -503,6 +503,30 @@ def get_phone_messages(phone, limit=200):
         ).fetchall()
 
 
+def get_recent_recipients(days=30, template_name=None, status="sent"):
+    """One row per unique phone we've successfully sent to in the last
+    `days` days, with the latest message's metadata.
+    """
+    sql = (
+        "SELECT customer_phone AS phone, "
+        "       MAX(sent_at)     AS sent_at, "
+        "       customer_name    AS name, "
+        "       route, platform, template_name "
+        "FROM messages "
+        "WHERE sent_at >= datetime('now', '+330 minutes', ?) "
+    )
+    params = [f"-{int(days)} days"]
+    if status:
+        sql += " AND status = ?"
+        params.append(status)
+    if template_name:
+        sql += " AND template_name = ?"
+        params.append(template_name)
+    sql += " GROUP BY customer_phone ORDER BY sent_at DESC"
+    with get_db() as db:
+        return [dict(r) for r in db.execute(sql, params).fetchall()]
+
+
 # ---------------- Dashboard stats ----------------
 def get_today_stats():
     with get_db() as db:
