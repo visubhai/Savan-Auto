@@ -484,7 +484,7 @@ function sendTemplateFromInbox() {
     if (data.ok) {
       appendBubble({
         id: data.id, direction: 'out',
-        content: '📋 Sent template: ' + tpl,
+        content: data.content || ('📋 Sent template: ' + tpl),
         timestamp: new Date(Date.now() + 330*60000).toISOString().replace('T',' ').substr(0,19),
         status: 'sent'
       });

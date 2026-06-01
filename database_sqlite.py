@@ -157,7 +157,8 @@ def init_db():
             status TEXT,
             media_path TEXT,
             mime_type TEXT,
-            filename TEXT
+            filename TEXT,
+            storage_kind TEXT DEFAULT 'local'
         );
 
         CREATE INDEX IF NOT EXISTS idx_messages_batch ON messages(batch_id);
@@ -181,6 +182,8 @@ def init_db():
         for col in ("media_path", "mime_type", "filename"):
             if col not in cols:
                 db.execute(f"ALTER TABLE chats ADD COLUMN {col} TEXT")
+        if "storage_kind" not in cols:
+            db.execute("ALTER TABLE chats ADD COLUMN storage_kind TEXT DEFAULT 'local'")
 
     # Seed default admin if no users exist
     with get_db() as db:
@@ -620,16 +623,18 @@ def delete_scheduled_job(job_id):
 
 def save_chat_message(phone, customer_name, direction, content,
                        wa_message_id=None, message_type="text", status=None,
-                       media_path=None, mime_type=None, filename=None):
+                       media_path=None, mime_type=None, filename=None,
+                       storage_kind=None):
     with get_db() as db:
         cur = db.execute(
             """INSERT INTO chats (phone, customer_name, direction, content,
                wa_message_id, message_type, read, status,
-               media_path, mime_type, filename)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               media_path, mime_type, filename, storage_kind)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (phone, customer_name, direction, content,
              wa_message_id, message_type, 1 if direction == "out" else 0, status,
-             media_path, mime_type, filename),
+             media_path, mime_type, filename,
+             storage_kind or ("local" if media_path else None)),
         )
         return cur.lastrowid
 

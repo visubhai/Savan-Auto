@@ -548,7 +548,8 @@ else:
 
     def save_chat_message(phone, customer_name, direction, content,
                            wa_message_id=None, message_type="text", status=None,
-                           media_path=None, mime_type=None, filename=None):
+                           media_path=None, mime_type=None, filename=None,
+                           storage_kind=None):
         msg_id = _next_id("chats")
         _db().chats.insert_one({
             "id": msg_id,
@@ -564,6 +565,7 @@ else:
             "media_path": media_path,
             "mime_type": mime_type,
             "filename": filename,
+            "storage_kind": storage_kind or ("local" if media_path else None),
         })
         return msg_id
 

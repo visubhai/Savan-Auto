@@ -14,11 +14,13 @@ from flask import (
     Flask, render_template, request, redirect, url_for, session,
     jsonify, flash, send_file, abort,
 )
+# `redirect` is already imported above — used by serve_media for R2.
 
 import database as db
 from parsers import auto_parse, extract_all_phones
 from meta_api import WhatsAppAPI
 import scheduler
+import storage
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "savan-travels-localhost-secret-2024")
@@ -49,6 +51,32 @@ _MIME_EXT = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
     "text/plain": ".txt",
 }
+
+
+def render_template_body(body, name=None, route=None, platform=None, extra=None):
+    """Substitute {{1}}, {{2}}, {{3}}, … in a WhatsApp template body.
+
+    Variables 1-3 map to the per-passenger fields (name / route / platform),
+    matching the scheduler's send-time mapping. `extra` is a dict of
+    {position_str: value} for any higher-indexed variables (e.g. fixed
+    campaign values) — used opportunistically; unknown placeholders are
+    left as-is so it's obvious the data wasn't logged.
+    """
+    if not body:
+        return ""
+    import re
+    subs = {
+        "1": (name or "Customer"),
+        "2": (route or "your journey"),
+        "3": (platform or "the platform"),
+    }
+    if extra:
+        for k, v in extra.items():
+            if v:
+                subs[str(k)] = str(v)
+    def _sub(m):
+        return subs.get(m.group(1), m.group(0))
+    return re.sub(r"\{\{(\d+)\}\}", _sub, body)
 
 
 def _ext_for_mime(mime):
@@ -974,8 +1002,11 @@ def webhook_receive():
                     contacts = value.get("contacts", [])
                     name = contacts[0].get("profile", {}).get("name", "") if contacts else ""
 
-                    # Download media now — Meta's URL expires in ~5 minutes
+                    # Download media now — Meta's URL expires in ~5 minutes.
+                    # If R2 is configured, persist there (survives redeploys);
+                    # otherwise fall back to the ephemeral local disk.
                     media_path = None
+                    storage_kind = None
                     if media_id:
                         try:
                             api = WhatsAppAPI()
@@ -986,10 +1017,19 @@ def webhook_receive():
                                 ext = _ext_for_mime(mime_type)
                                 safe_id = "".join(c for c in (wa_id or media_id) if c.isalnum() or c in "._-")
                                 rel_name = f"{safe_id}{ext}"
-                                full_path = os.path.join(MEDIA_DIR, rel_name)
-                                with open(full_path, "wb") as fh:
-                                    fh.write(data)
-                                media_path = rel_name
+
+                                if storage.is_configured():
+                                    key = storage.upload_bytes(rel_name, data, mime_type)
+                                    if key:
+                                        media_path = key
+                                        storage_kind = "r2"
+                                if not media_path:
+                                    # Local fallback (also covers R2 upload failure)
+                                    full_path = os.path.join(MEDIA_DIR, rel_name)
+                                    with open(full_path, "wb") as fh:
+                                        fh.write(data)
+                                    media_path = rel_name
+                                    storage_kind = "local"
                         except Exception as e:
                             app.logger.error(f"Media download failed for {media_id}: {e}")
 
@@ -997,6 +1037,7 @@ def webhook_receive():
                         phone, name or None, "in", content,
                         wa_message_id=wa_id, message_type=msg_type,
                         media_path=media_path, mime_type=mime_type, filename=filename,
+                        storage_kind=storage_kind,
                     )
 
                 # ── Status updates (sent → delivered → read) ───────────────
@@ -1029,17 +1070,28 @@ def inbox():
     if active_phone:
         # Real two-way chat messages
         chats = [dict(m) for m in db.get_conversation(active_phone, 200)]
-        # Bulk template sends to this phone (presented as outgoing bubbles)
+        # Bulk template sends to this phone (presented as outgoing bubbles
+        # with the actual rendered text, not just the template name).
         bulk = [dict(m) for m in db.get_phone_messages(active_phone, 200)]
+        bodies = {t["name"]: t.get("body", "") for t in templates}
         for b in bulk:
+            tname = b.get("template_name", "")
+            rendered = render_template_body(
+                bodies.get(tname, ""),
+                name=b.get("customer_name"),
+                route=b.get("route"),
+                platform=b.get("platform"),
+            )
+            content = rendered or f"📋 Sent template: {tname}"
             messages.append({
                 "id": f"b{b.get('id')}",     # distinct id space from chats
                 "direction": "out",
-                "content": f"📋 Sent template: {b.get('template_name','')}",
+                "content": content,
                 "timestamp": b.get("sent_at"),
                 "status": b.get("status"),
                 "customer_name": b.get("customer_name"),
                 "message_type": "template",
+                "template_name": tname,
                 "is_bulk": True,
             })
         for c in chats:
@@ -1134,13 +1186,19 @@ def inbox_send_template():
     if not ok:
         return jsonify({"ok": False, "error": result}), 400
 
-    # Log into the chat thread so it appears in the conversation timeline.
+    # Render the body with the exact variable values used so the chat shows
+    # what the customer actually received, not just the template name.
+    body = tpl.get("body") or ""
+    rendered = body
+    for i, val in enumerate(params, start=1):
+        rendered = rendered.replace("{{" + str(i) + "}}", str(val))
+    content = rendered or f"📋 Sent template: {tpl_name}"
+
     msg_id = db.save_chat_message(
-        phone_clean, None, "out",
-        f"📋 Sent template: {tpl_name}",
+        phone_clean, None, "out", content,
         wa_message_id=result, message_type="template", status="sent",
     )
-    return jsonify({"ok": True, "id": msg_id})
+    return jsonify({"ok": True, "id": msg_id, "content": content})
 
 
 @app.route("/api/inbox/messages")
@@ -1183,10 +1241,21 @@ def serve_media(chat_id):
 
     if not chat or not chat.get("media_path"):
         abort(404)
+
+    # If the file lives in Cloudflare R2, redirect to a short-lived signed URL
+    # so the browser fetches the bytes directly (no Render bandwidth cost).
+    if chat.get("storage_kind") == "r2" and storage.is_configured():
+        url = storage.signed_url(
+            chat["media_path"],
+            filename=chat.get("filename") or chat["media_path"],
+        )
+        if url:
+            return redirect(url)
+
+    # Local file
     full = os.path.join(MEDIA_DIR, chat["media_path"])
     if not os.path.exists(full):
         abort(404)
-
     return send_file(
         full,
         mimetype=chat.get("mime_type") or "application/octet-stream",
