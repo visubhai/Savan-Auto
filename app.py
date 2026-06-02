@@ -966,15 +966,18 @@ def _handle_review_csv(content, source_label):
     pending = {
         "passengers": [
             {
-                "phone":    r["phone"],
-                "name":     r.get("name") or "Customer",
-                "route":    r.get("route") or "",
-                "platform": r.get("platform") or "",
+                "phone":         r["phone"],
+                "name":          r.get("name") or "Customer",
+                "route":         r.get("route") or "",
+                "platform":      r.get("platform") or "",
+                "sent_at":       r.get("sent_at") or "",
+                "template_name": r.get("template_name") or "",
             }
             for r in non_review
         ],
         "stats": {
             "total_rows": parsed["total_rows"],
+            "reviewers":  len(reviewers),
             "cancelled":  parsed.get("skipped_no_phone", 0),
             "duplicates": 0,
             "invalid":    parsed.get("skipped_invalid_phone", 0),
@@ -982,15 +985,17 @@ def _handle_review_csv(content, source_label):
             "ready":      len(non_review),
         },
         "filename": f"Follow-up · {source_label} · {len(non_review)} non-reviewers (last {days}d)",
+        "review_source": source_label,
+        "lookback_days": days,
     }
     key = save_pending(pending)
     session["pending_key"] = key
     flash(
         f"✓ {len(reviewers)} reviewed · {len(non_review)} did not. "
-        f"Pick a follow-up template below and send.",
+        f"Refine your targets below, then send.",
         "success",
     )
-    return redirect(url_for("send_preview"))
+    return redirect(url_for("reviews_refine"))
 
 
 @app.route("/reviews/upload", methods=["POST"])
@@ -1044,6 +1049,76 @@ def reviews_fetch():
         return redirect(url_for("reviews"))
 
     return _handle_review_csv(attach["content_bytes"], attach["filename"])
+
+
+@app.route("/reviews/refine")
+@login_required
+def reviews_refine():
+    """Filter & select non-reviewers before they're sent to send_preview."""
+    key = session.get("pending_key")
+    pending = load_pending(key)
+    if not pending or not pending.get("passengers"):
+        flash("No pending non-reviewers — upload a review CSV first.", "error")
+        return redirect(url_for("reviews"))
+
+    passengers = pending["passengers"]
+    # Distinct values + counts for the filter sidebar
+    from collections import Counter
+    route_counts    = Counter((p.get("route") or "—") for p in passengers)
+    platform_counts = Counter((p.get("platform") or "—") for p in passengers)
+    template_counts = Counter((p.get("template_name") or "—") for p in passengers)
+
+    # Date bounds for the date-range pickers (sent_at = "YYYY-MM-DD HH:MM:SS")
+    dates = [p.get("sent_at") for p in passengers if p.get("sent_at")]
+    min_date = min(dates)[:10] if dates else ""
+    max_date = max(dates)[:10] if dates else ""
+
+    return render_template(
+        "reviews_refine.html",
+        pending=pending,
+        passengers=passengers,
+        route_counts=sorted(route_counts.items(), key=lambda x: -x[1]),
+        platform_counts=sorted(platform_counts.items(), key=lambda x: -x[1]),
+        template_counts=sorted(template_counts.items(), key=lambda x: -x[1]),
+        min_date=min_date,
+        max_date=max_date,
+    )
+
+
+@app.route("/reviews/refine/continue", methods=["POST"])
+@login_required
+def reviews_refine_continue():
+    """Take the user-refined passenger list and hand off to send_preview."""
+    key = session.get("pending_key")
+    pending = load_pending(key)
+    if not pending:
+        flash("Session expired — upload again.", "error")
+        return redirect(url_for("reviews"))
+
+    raw = request.form.get("passengers_json", "").strip()
+    try:
+        selected = json.loads(raw) if raw else []
+    except Exception:
+        selected = []
+    selected = [p for p in selected if p.get("phone")]
+    if not selected:
+        flash("Pick at least one passenger before continuing.", "error")
+        return redirect(url_for("reviews_refine"))
+
+    # Reduce to the slim shape send_preview expects
+    pending["passengers"] = [
+        {
+            "phone":    p["phone"],
+            "name":     p.get("name") or "Customer",
+            "route":    p.get("route") or "",
+            "platform": p.get("platform") or "",
+        }
+        for p in selected
+    ]
+    pending["stats"]["ready"] = len(pending["passengers"])
+    new_key = save_pending(pending)
+    session["pending_key"] = new_key
+    return redirect(url_for("send_preview"))
 
 
 @app.route("/api/settings/gmail-test", methods=["POST"])

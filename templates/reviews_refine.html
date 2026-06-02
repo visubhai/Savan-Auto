@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}Refine Follow-up Targets{% endblock %}
+{% block page_title %}Refine Follow-up Targets{% endblock %}
+
+{% block topbar_actions %}
+  <a href="{{ url_for('reviews') }}" class="btn btn-ghost btn-sm">← Back</a>
+{% endblock %}
+
+{% block content %}
+<style>
+  .refine-wrap   { display:grid; grid-template-columns:260px 1fr; gap:16px; align-items:start; max-width:1200px; }
+  .filter-panel  { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; position:sticky; top:72px; }
+  .filter-group  { margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid var(--border); }
+  .filter-group:last-child { border-bottom:none; padding-bottom:0; margin-bottom:0; }
+  .filter-title  { font-size:11px; font-weight:600; letter-spacing:0.06em; color:#aaa; text-transform:uppercase; margin-bottom:8px; }
+  .filter-row    { display:flex; gap:6px; margin-bottom:4px; }
+  .filter-row .input { padding:6px 8px; font-size:12px; }
+  .chk-list      { max-height:170px; overflow-y:auto; padding-right:4px; }
+  .chk           { display:flex; align-items:center; gap:7px; padding:4px 0; cursor:pointer; font-size:12.5px; color:#bbb; }
+  .chk input     { cursor:pointer; flex-shrink:0; }
+  .chk .count    { margin-left:auto; color:#666; font-size:11px; font-family:monospace; }
+  .chk:hover     { color:#fff; }
+  .stats-row     { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+  .stat-pill     { background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:12px 14px; text-align:center; }
+  .stat-pill .v  { font-size:20px; font-weight:800; font-family:'Bricolage Grotesque',sans-serif; color:#fff; }
+  .stat-pill.ok .v { color:var(--amber); }
+  .stat-pill .l  { font-size:10.5px; color:var(--muted); margin-top:2px; }
+  .table-card    { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .table-card thead { background:#1a1a1a; position:sticky; top:0; z-index:2; }
+  .table-card th { padding:8px 10px; text-align:left; font-size:10px; font-weight:600; letter-spacing:0.06em; color:var(--muted); text-transform:uppercase; }
+  .table-card td { padding:7px 10px; font-size:12.5px; color:#ccc; vertical-align:middle; }
+  .pax-row.skip-row { opacity:0.35; }
+  .pax-row.skip-row td:not(:first-child) { text-decoration:line-through; }
+  .reset-link    { font-size:11px; color:#888; cursor:pointer; text-decoration:underline; }
+  .reset-link:hover { color:var(--amber); }
+  .continue-bar  { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 18px; display:flex; align-items:center; gap:14px; margin-top:14px; position:sticky; bottom:14px; box-shadow:0 -8px 20px rgba(0,0,0,0.4); }
+  .continue-bar .label { font-size:13px; color:#aaa; }
+  .continue-bar .count { color:var(--amber); font-weight:700; }
+</style>
+
+<div class="refine-wrap">
+
+  <!-- ───── Filter sidebar ───── -->
+  <div class="filter-panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="font-size:13.5px;font-weight:700;color:#fff;">Filters</div>
+      <span class="reset-link" onclick="resetFilters()">↻ Reset all</span>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-title">Sent date</div>
+      <div class="filter-row">
+        <input type="date" id="dateFrom" class="input" value="{{ min_date }}" min="{{ min_date }}" max="{{ max_date }}">
+        <input type="date" id="dateTo"   class="input" value="{{ max_date }}" min="{{ min_date }}" max="{{ max_date }}">
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-title">Days since send</div>
+      <div class="filter-row">
+        <input type="number" id="ageMin" class="input" placeholder="min" min="0">
+        <input type="number" id="ageMax" class="input" placeholder="max" min="0">
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-title">Route</div>
+      <div class="chk-list" id="routeList">
+        {% for name, n in route_counts %}
+        <label class="chk">
+          <input type="checkbox" class="f-route" value="{{ name }}" checked>
+          <span>{{ name }}</span><span class="count">{{ n }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-title">Platform</div>
+      <div class="chk-list" id="platformList">
+        {% for name, n in platform_counts %}
+        <label class="chk">
+          <input type="checkbox" class="f-platform" value="{{ name }}" checked>
+          <span>{{ name }}</span><span class="count">{{ n }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <div class="filter-title">Original template received</div>
+      <div class="chk-list" id="tplList">
+        {% for name, n in template_counts %}
+        <label class="chk">
+          <input type="checkbox" class="f-tpl" value="{{ name }}" checked>
+          <span>{{ name }}</span><span class="count">{{ n }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ───── Right: stats + table ───── -->
+  <div>
+    <div class="stats-row">
+      <div class="stat-pill"><div class="v" id="totalC">{{ passengers|length }}</div><div class="l">Total candidates</div></div>
+      <div class="stat-pill"><div class="v" id="visibleC">{{ passengers|length }}</div><div class="l">Match filters</div></div>
+      <div class="stat-pill ok"><div class="v" id="selectedC">{{ passengers|length }}</div><div class="l">Selected to send</div></div>
+      <div class="stat-pill"><div class="v">{{ pending.stats.reviewers or 0 }}</div><div class="l">Already reviewed</div></div>
+    </div>
+
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="bulkCheck(true)">✓ Check all visible</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="bulkCheck(false)">✗ Uncheck all visible</button>
+    </div>
+
+    <div class="table-card">
+      <div style="overflow:auto;max-height:600px;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th style="width:32px;text-align:center;"><input type="checkbox" id="checkAll" checked onchange="bulkCheck(this.checked)"></th>
+              <th>Name</th>
+              <th>Phone</th>
+              <th>Route</th>
+              <th>Platform</th>
+              <th>Sent</th>
+              <th>Days ago</th>
+              <th>Template</th>
+            </tr>
+          </thead>
+          <tbody id="paxBody">
+            {% for p in passengers %}
+            <tr class="pax-row"
+                data-idx="{{ loop.index0 }}"
+                data-sent="{{ (p.sent_at or '')[:10] }}"
+                data-route="{{ p.route or '—' }}"
+                data-platform="{{ p.platform or '—' }}"
+                data-tpl="{{ p.template_name or '—' }}">
+              <td style="text-align:center;"><input type="checkbox" class="pax-check" checked></td>
+              <td style="color:#ddd;">{{ p.name or '—' }}</td>
+              <td style="font-family:monospace;font-size:12px;color:#888;">{{ p.phone }}</td>
+              <td style="color:#aaa;">{{ p.route or '—' }}</td>
+              <td style="color:#aaa;">{{ p.platform or '—' }}</td>
+              <td style="color:#888;white-space:nowrap;">{{ (p.sent_at or '—')[:10] }}</td>
+              <td style="color:#888;text-align:right;font-family:monospace;" class="days-cell">—</td>
+              <td style="color:#888;font-size:11px;">{{ p.template_name or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <form method="POST" action="{{ url_for('reviews_refine_continue') }}" id="refineForm">
+      <input type="hidden" name="passengers_json" id="passengersJson" value="">
+      <div class="continue-bar">
+        <div class="label">Sending follow-up to <span class="count" id="sendCount">0</span> passengers</div>
+        <div style="margin-left:auto;">
+          <button type="submit" class="btn btn-primary" id="continueBtn">Continue to template & send →</button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+</div>
+
+<script>
+// Passenger payload for submit — full per-row dataset, never mutated
+const PAX = {{ passengers|tojson }};
+
+// Compute "days ago" once
+(function fillDaysAgo() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  document.querySelectorAll('.pax-row').forEach(function(row) {
+    const d = row.dataset.sent;
+    if (!d) return;
+    const t = new Date(d + 'T00:00:00+05:30');
+    const days = Math.round((today - t) / 86400000);
+    row.dataset.days = days;
+    row.querySelector('.days-cell').textContent = days;
+  });
+})();
+
+function getSelectedSet(cls) {
+  const out = new Set();
+  document.querySelectorAll('.' + cls + ':checked').forEach(function(el){ out.add(el.value); });
+  return out;
+}
+
+function applyFilters() {
+  const dFrom = document.getElementById('dateFrom').value;
+  const dTo   = document.getElementById('dateTo').value;
+  const aMin  = document.getElementById('ageMin').value;
+  const aMax  = document.getElementById('ageMax').value;
+  const ageMin = aMin === '' ? null : parseInt(aMin);
+  const ageMax = aMax === '' ? null : parseInt(aMax);
+  const routeSet    = getSelectedSet('f-route');
+  const platformSet = getSelectedSet('f-platform');
+  const tplSet      = getSelectedSet('f-tpl');
+
+  let visible = 0;
+  document.querySelectorAll('.pax-row').forEach(function(row) {
+    const sent = row.dataset.sent || '';
+    const days = parseInt(row.dataset.days || 'NaN');
+    const route = row.dataset.route || '';
+    const platform = row.dataset.platform || '';
+    const tpl = row.dataset.tpl || '';
+    let show = true;
+    if (dFrom && sent && sent < dFrom) show = false;
+    if (dTo   && sent && sent > dTo)   show = false;
+    if (ageMin !== null && !isNaN(days) && days < ageMin) show = false;
+    if (ageMax !== null && !isNaN(days) && days > ageMax) show = false;
+    if (routeSet.size    && !routeSet.has(route))    show = false;
+    if (platformSet.size && !platformSet.has(platform)) show = false;
+    if (tplSet.size      && !tplSet.has(tpl))        show = false;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  document.getElementById('visibleC').textContent = visible;
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  let n = 0;
+  document.querySelectorAll('.pax-row').forEach(function(row) {
+    if (row.style.display !== 'none' && row.querySelector('.pax-check').checked) n++;
+  });
+  document.getElementById('selectedC').textContent = n;
+  document.getElementById('sendCount').textContent = n;
+  document.getElementById('continueBtn').disabled = (n === 0);
+}
+
+function bulkCheck(checked) {
+  document.querySelectorAll('.pax-row').forEach(function(row) {
+    if (row.style.display !== 'none') {
+      row.querySelector('.pax-check').checked = checked;
+    }
+  });
+  updateSelectedCount();
+}
+
+function resetFilters() {
+  document.getElementById('dateFrom').value = '{{ min_date }}';
+  document.getElementById('dateTo').value   = '{{ max_date }}';
+  document.getElementById('ageMin').value = '';
+  document.getElementById('ageMax').value = '';
+  document.querySelectorAll('.f-route, .f-platform, .f-tpl').forEach(function(el){ el.checked = true; });
+  document.querySelectorAll('.pax-check').forEach(function(el){ el.checked = true; });
+  applyFilters();
+}
+
+// Wire up
+['dateFrom','dateTo','ageMin','ageMax'].forEach(function(id){
+  document.getElementById(id).addEventListener('input', applyFilters);
+});
+document.querySelectorAll('.f-route, .f-platform, .f-tpl').forEach(function(el){
+  el.addEventListener('change', applyFilters);
+});
+document.querySelectorAll('.pax-check').forEach(function(el){
+  el.addEventListener('change', updateSelectedCount);
+});
+
+// On submit, package up the checked + visible passengers
+document.getElementById('refineForm').addEventListener('submit', function(e) {
+  const selected = [];
+  document.querySelectorAll('.pax-row').forEach(function(row){
+    if (row.style.display !== 'none' && row.querySelector('.pax-check').checked) {
+      selected.push(PAX[parseInt(row.dataset.idx)]);
+    }
+  });
+  if (selected.length === 0) {
+    e.preventDefault();
+    alert('Pick at least one passenger before continuing.');
+    return;
+  }
+  document.getElementById('passengersJson').value = JSON.stringify(selected);
+});
+
+// Initial paint
+applyFilters();
+</script>
+{% endblock %}
