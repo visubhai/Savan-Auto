@@ -7,12 +7,12 @@
   .camp-grid { display:grid; grid-template-columns:1fr 380px; gap:20px; align-items:start; }
   .camp-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:12px; transition:border-color .15s; }
   .camp-card.editing { border-color:var(--amber); }
-  .camp-name { font-family:'Bricolage Grotesque',sans-serif; font-size:16px; font-weight:700; color:#ddd; margin-bottom:4px; }
-  .camp-meta { font-size:12px; color:#666; margin-bottom:10px; }
+  .camp-name { font-family:'Bricolage Grotesque',sans-serif; font-size:16px; font-weight:700; color:#0f172a; margin-bottom:4px; }
+  .camp-meta { font-size:12px; color:#94a3b8; margin-bottom:10px; }
   .var-pills { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
   .var-pill { background:#1a2a1a; color:#8bc34a; border:1px solid #2a4a2a; border-radius:6px; padding:3px 10px; font-size:12px; font-family:monospace; }
-  .var-pill span { color:#666; margin-right:4px; }
-  .empty-state { text-align:center; padding:48px 20px; color:#444; }
+  .var-pill span { color:#94a3b8; margin-right:4px; }
+  .empty-state { text-align:center; padding:48px 20px; color:#cbd5e1; }
   .empty-state .icon { font-size:48px; margin-bottom:12px; }
   .right-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; position:sticky; top:20px; }
 </style>
@@ -30,7 +30,7 @@
           <div style="flex:1;min-width:0;">
             <div class="camp-name">{{ c.name }}</div>
             <div class="camp-meta">
-              Template: <strong style="color:#aaa;">{{ c.template_name }}</strong>
+              Template: <strong style="color:#475569;">{{ c.template_name }}</strong>
               &nbsp;·&nbsp;
               {% if c.last_used_at %}Last used: {{ c.last_used_at[:10] }}{% else %}Never used{% endif %}
             </div>
@@ -57,8 +57,8 @@
     {% else %}
       <div class="empty-state">
         <div class="icon">🎯</div>
-        <div style="font-size:15px;color:#666;margin-bottom:6px;">No campaigns yet</div>
-        <div style="font-size:13px;color:#444;">Create your first campaign using the form →</div>
+        <div style="font-size:15px;color:#94a3b8;margin-bottom:6px;">No campaigns yet</div>
+        <div style="font-size:13px;color:#cbd5e1;">Create your first campaign using the form →</div>
       </div>
     {% endif %}
   </div>
@@ -67,7 +67,7 @@
   <div>
     <div class="right-card">
       <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:4px;" id="formTitle">✨ New Campaign</div>
-      <div style="font-size:12px;color:#666;margin-bottom:16px;" id="formSub">Fill in the details and save.</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:16px;" id="formSub">Fill in the details and save.</div>
 
       <form method="POST" id="campForm" action="{{ url_for('campaigns_create') }}">
         <input type="hidden" id="editId" name="_edit_id" value="">
@@ -88,7 +88,7 @@
         </select>
 
         <!-- Template preview -->
-        <div id="tplPreview" style="display:none;background:#111;border-radius:8px;padding:10px 12px;font-size:12px;color:#777;margin-bottom:12px;white-space:pre-wrap;line-height:1.6;border:1px solid var(--border);max-height:120px;overflow-y:auto;"></div>
+        <div id="tplPreview" style="display:none;background:#f8fafc;border-radius:8px;padding:10px 12px;font-size:12px;color:#777;margin-bottom:12px;white-space:pre-wrap;line-height:1.6;border:1px solid var(--border);max-height:120px;overflow-y:auto;"></div>
 
         <!-- Variable inputs rendered here -->
         <div id="varFields"></div>

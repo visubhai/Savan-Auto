@@ -43,7 +43,7 @@
 <!-- Count bar -->
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 2px;">
   <div style="font-size:13px;color:var(--muted);">
-    Showing <strong style="color:#ccc;">{{ messages|length }}</strong> of <strong style="color:#ccc;">{{ total }}</strong> messages
+    Showing <strong style="color:#1e293b;">{{ messages|length }}</strong> of <strong style="color:#1e293b;">{{ total }}</strong> messages
   </div>
   {% if total > 0 %}
   <div style="font-size:12px;color:var(--muted);">Page {{ page }} of {{ total_pages }}</div>
@@ -70,11 +70,11 @@
         {% for m in messages %}
         <tr>
           <td style="font-size:12px;color:var(--muted);white-space:nowrap;">{{ m.sent_at or '—' }}</td>
-          <td style="font-weight:500;color:#e0e0e0;">{{ m.customer_name or '—' }}</td>
-          <td style="font-family:monospace;font-size:12px;color:#888;">{{ m.customer_phone }}</td>
+          <td style="font-weight:500;color:#0f172a;">{{ m.customer_name or '—' }}</td>
+          <td style="font-family:monospace;font-size:12px;color:#64748b;">{{ m.customer_phone }}</td>
           <td style="font-size:12.5px;">{{ m.route or '—' }}</td>
           <td style="font-size:12.5px;">{{ m.platform or '—' }}</td>
-          <td style="font-size:11px;color:#666;">{{ m.template_name or '—' }}</td>
+          <td style="font-size:11px;color:#94a3b8;">{{ m.template_name or '—' }}</td>
           <td>
             <span class="status-dot badge-{{ m.status }}">
               {{ '✓' if m.status=='sent' else '✗' if m.status=='failed' else '…' }}

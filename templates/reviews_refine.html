@@ -12,29 +12,29 @@
   .filter-panel  { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; position:sticky; top:72px; }
   .filter-group  { margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid var(--border); }
   .filter-group:last-child { border-bottom:none; padding-bottom:0; margin-bottom:0; }
-  .filter-title  { font-size:11px; font-weight:600; letter-spacing:0.06em; color:#aaa; text-transform:uppercase; margin-bottom:8px; }
+  .filter-title  { font-size:11px; font-weight:600; letter-spacing:0.06em; color:#475569; text-transform:uppercase; margin-bottom:8px; }
   .filter-row    { display:flex; gap:6px; margin-bottom:4px; }
   .filter-row .input { padding:6px 8px; font-size:12px; }
   .chk-list      { max-height:170px; overflow-y:auto; padding-right:4px; }
-  .chk           { display:flex; align-items:center; gap:7px; padding:4px 0; cursor:pointer; font-size:12.5px; color:#bbb; }
+  .chk           { display:flex; align-items:center; gap:7px; padding:4px 0; cursor:pointer; font-size:12.5px; color:#475569; }
   .chk input     { cursor:pointer; flex-shrink:0; }
-  .chk .count    { margin-left:auto; color:#666; font-size:11px; font-family:monospace; }
-  .chk:hover     { color:#fff; }
+  .chk .count    { margin-left:auto; color:#94a3b8; font-size:11px; font-family:monospace; }
+  .chk:hover     { color:var(--text); }
   .stats-row     { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
   .stat-pill     { background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:12px 14px; text-align:center; }
-  .stat-pill .v  { font-size:20px; font-weight:800; font-family:'Bricolage Grotesque',sans-serif; color:#fff; }
+  .stat-pill .v  { font-size:20px; font-weight:800; font-family:'Bricolage Grotesque',sans-serif; color:var(--text); }
   .stat-pill.ok .v { color:var(--amber); }
   .stat-pill .l  { font-size:10.5px; color:var(--muted); margin-top:2px; }
   .table-card    { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
-  .table-card thead { background:#1a1a1a; position:sticky; top:0; z-index:2; }
+  .table-card thead { background:#f8fafc; position:sticky; top:0; z-index:2; }
   .table-card th { padding:8px 10px; text-align:left; font-size:10px; font-weight:600; letter-spacing:0.06em; color:var(--muted); text-transform:uppercase; }
-  .table-card td { padding:7px 10px; font-size:12.5px; color:#ccc; vertical-align:middle; }
+  .table-card td { padding:7px 10px; font-size:12.5px; color:#1e293b; vertical-align:middle; }
   .pax-row.skip-row { opacity:0.35; }
   .pax-row.skip-row td:not(:first-child) { text-decoration:line-through; }
-  .reset-link    { font-size:11px; color:#888; cursor:pointer; text-decoration:underline; }
+  .reset-link    { font-size:11px; color:#64748b; cursor:pointer; text-decoration:underline; }
   .reset-link:hover { color:var(--amber); }
   .continue-bar  { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 18px; display:flex; align-items:center; gap:14px; margin-top:14px; position:sticky; bottom:14px; box-shadow:0 -8px 20px rgba(0,0,0,0.4); }
-  .continue-bar .label { font-size:13px; color:#aaa; }
+  .continue-bar .label { font-size:13px; color:#475569; }
   .continue-bar .count { color:var(--amber); font-weight:700; }
 </style>
 
@@ -43,7 +43,7 @@
   <!-- ───── Filter sidebar ───── -->
   <div class="filter-panel">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <div style="font-size:13.5px;font-weight:700;color:#fff;">Filters</div>
+      <div style="font-size:13.5px;font-weight:700;color:var(--text);">Filters</div>
       <span class="reset-link" onclick="resetFilters()">↻ Reset all</span>
     </div>
 
@@ -138,13 +138,13 @@
                 data-platform="{{ p.platform or '—' }}"
                 data-tpl="{{ p.template_name or '—' }}">
               <td style="text-align:center;"><input type="checkbox" class="pax-check" checked></td>
-              <td style="color:#ddd;">{{ p.name or '—' }}</td>
-              <td style="font-family:monospace;font-size:12px;color:#888;">{{ p.phone }}</td>
-              <td style="color:#aaa;">{{ p.route or '—' }}</td>
-              <td style="color:#aaa;">{{ p.platform or '—' }}</td>
-              <td style="color:#888;white-space:nowrap;">{{ (p.sent_at or '—')[:10] }}</td>
-              <td style="color:#888;text-align:right;font-family:monospace;" class="days-cell">—</td>
-              <td style="color:#888;font-size:11px;">{{ p.template_name or '—' }}</td>
+              <td style="color:#0f172a;">{{ p.name or '—' }}</td>
+              <td style="font-family:monospace;font-size:12px;color:#64748b;">{{ p.phone }}</td>
+              <td style="color:#475569;">{{ p.route or '—' }}</td>
+              <td style="color:#475569;">{{ p.platform or '—' }}</td>
+              <td style="color:#64748b;white-space:nowrap;">{{ (p.sent_at or '—')[:10] }}</td>
+              <td style="color:#64748b;text-align:right;font-family:monospace;" class="days-cell">—</td>
+              <td style="color:#64748b;font-size:11px;">{{ p.template_name or '—' }}</td>
             </tr>
             {% endfor %}
           </tbody>

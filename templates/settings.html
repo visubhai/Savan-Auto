@@ -87,10 +87,10 @@
       <div>
         <label class="input-label">Callback URL (paste in Meta)</label>
         <div style="display:flex;gap:8px;align-items:center;">
-          <input type="text" id="webhookUrl" readonly value="{{ settings.webhook_url or (request.host_url.rstrip('/') + '/webhook') }}" class="input" style="flex:1;color:#ccc;font-size:12px;">
+          <input type="text" id="webhookUrl" readonly value="{{ settings.webhook_url or (request.host_url.rstrip('/') + '/webhook') }}" class="input" style="flex:1;color:#1e293b;font-size:12px;">
           <button type="button" onclick="copyWebhook()" class="btn btn-ghost btn-sm">Copy</button>
         </div>
-        <div style="font-size:11px;color:#555;margin-top:4px;">This is your permanent public URL — copy it into Meta once, never change it again.</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">This is your permanent public URL — copy it into Meta once, never change it again.</div>
       </div>
       <div>
         <label class="input-label">Verify Token (copy exactly into Meta)</label>
@@ -106,9 +106,9 @@
       </button>
       <span id="copiedHint" style="font-size:12px;color:#4caf50;display:none;">✓ Copied! Paste the URL in Meta now.</span>
     </div>
-    <div style="margin-top:10px;padding:10px 14px;background:#111;border-radius:8px;font-size:12px;color:#555;line-height:1.9;">
+    <div style="margin-top:10px;padding:10px 14px;background:#f8fafc;border-radius:8px;font-size:12px;color:#94a3b8;line-height:1.9;">
       <strong style="color:#4caf50;">✓ ngrok starts automatically</strong> when you launch the app — URL never changes.<br>
-      Click the button above → Meta opens → paste <strong style="color:#aaa;">Callback URL</strong> → paste <strong style="color:#aaa;">Verify Token</strong> → subscribe to <strong style="color:#aaa;">messages</strong> → Save. Done forever.
+      Click the button above → Meta opens → paste <strong style="color:#475569;">Callback URL</strong> → paste <strong style="color:#475569;">Verify Token</strong> → subscribe to <strong style="color:#475569;">messages</strong> → Save. Done forever.
     </div>
   </div>
 
@@ -125,7 +125,7 @@
       <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;">📬 Gmail Auto-Fetch (for Review Follow-up)</div>
       <button type="button" class="btn btn-ghost btn-sm" onclick="testGmail()">🔌 Test connection</button>
     </div>
-    <div style="font-size:12.5px;color:#666;line-height:1.6;margin-bottom:16px;">
+    <div style="font-size:12.5px;color:#94a3b8;line-height:1.6;margin-bottom:16px;">
       Lets the Review Follow-up page auto-fetch RedPro review CSVs from your Gmail.
       You need 2-Step Verification enabled and a 16-char
       <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--amber);">App Password</a>

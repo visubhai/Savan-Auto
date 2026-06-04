@@ -22,8 +22,8 @@
           {% for u in users %}
           <tr>
             <td style="color:var(--muted);">{{ u.id }}</td>
-            <td style="font-weight:500;color:#e0e0e0;">{{ u.display_name }}</td>
-            <td style="font-family:monospace;font-size:12.5px;color:#888;">{{ u.username }}</td>
+            <td style="font-weight:500;color:#0f172a;">{{ u.display_name }}</td>
+            <td style="font-family:monospace;font-size:12.5px;color:#64748b;">{{ u.username }}</td>
             <td>
               {% if u.role == 'admin' %}
               <span class="status-dot" style="background:rgba(245,158,11,0.12);color:var(--amber);">👑 admin</span>

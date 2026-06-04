@@ -20,7 +20,7 @@
         <!-- Empty state -->
         <div id="dropContent" style="padding:8px 0;">
           <div style="font-size:36px;margin-bottom:10px;">📂</div>
-          <div style="font-size:15px;font-weight:600;color:#ccc;margin-bottom:4px;">Drag &amp; drop CSV files here</div>
+          <div style="font-size:15px;font-weight:600;color:#1e293b;margin-bottom:4px;">Drag &amp; drop CSV files here</div>
           <div style="font-size:12.5px;color:var(--muted);margin-bottom:18px;">.csv, .txt, .tsv · multiple files OK</div>
           <button type="button" id="chooseBtnEmpty" class="btn btn-ghost" style="margin:0 auto;cursor:pointer;">
             📁 Choose Files
@@ -32,7 +32,7 @@
           <div id="fileList" style="margin-bottom:12px;max-height:160px;overflow-y:auto;"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
             <button type="button" id="addMoreBtn" class="btn btn-ghost btn-sm" style="cursor:pointer;">➕ Add More Files</button>
-            <button type="button" id="clearAllBtn" class="btn btn-ghost btn-sm" style="color:#666;cursor:pointer;">✕ Clear All</button>
+            <button type="button" id="clearAllBtn" class="btn btn-ghost btn-sm" style="color:#94a3b8;cursor:pointer;">✕ Clear All</button>
           </div>
         </div>
 
@@ -40,8 +40,8 @@
 
       <!-- Supported formats -->
       <div class="card2" style="padding:14px;margin-bottom:22px;">
-        <div style="font-size:11px;font-weight:600;color:#aaa;margin-bottom:10px;letter-spacing:0.05em;text-transform:uppercase;">Supported CSV Formats</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12.5px;color:#888;">
+        <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:10px;letter-spacing:0.05em;text-transform:uppercase;">Supported CSV Formats</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12.5px;color:#64748b;">
           <div>✅ RedBus Agent Report</div>
           <div>✅ AbhiBus Export</div>
           <div>✅ MakeMyTrip / Goibibo</div>
@@ -49,7 +49,7 @@
           <div>✅ Custom CSV (phone, name…)</div>
           <div>✅ Any CSV with phone column</div>
         </div>
-        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:#666;">
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:#94a3b8;">
           ⚠ Excel (.xlsx) not supported — export as CSV first
         </div>
       </div>
@@ -63,7 +63,7 @@
   <!-- Tips row -->
   <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
     <div class="card2" style="padding:16px;">
-      <div style="font-size:13px;font-weight:600;color:#ccc;margin-bottom:8px;">✨ Auto-handled for you</div>
+      <div style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:8px;">✨ Auto-handled for you</div>
       <ul style="font-size:12.5px;color:#777;line-height:2.2;list-style:none;padding:0;margin:0;">
         <li>🗑 Cancelled bookings removed</li>
         <li>🔁 Duplicate phones merged</li>
@@ -73,7 +73,7 @@
       </ul>
     </div>
     <div class="card2" style="padding:16px;">
-      <div style="font-size:13px;font-weight:600;color:#ccc;margin-bottom:8px;">💰 Your Cost vs Wapsolution</div>
+      <div style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:8px;">💰 Your Cost vs Wapsolution</div>
       <ul style="font-size:12.5px;color:#777;line-height:2.2;list-style:none;padding:0;margin:0;">
         <li>💚 Your cost: ₹0.12/message</li>
         <li>❌ Wapsolution: ₹2000/month fixed</li>
@@ -116,9 +116,9 @@
       return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;margin-bottom:4px;'
            + 'background:#141414;border:1px solid var(--border);border-radius:7px;">'
            + '<span style="font-size:14px;">📄</span>'
-           + '<span style="flex:1;font-size:12.5px;color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + f.name + '</span>'
-           + '<span style="font-size:11px;color:#555;flex-shrink:0;">' + (f.size/1024).toFixed(0) + ' KB</span>'
-           + '<button type="button" data-idx="' + i + '" style="background:none;border:none;color:#555;'
+           + '<span style="flex:1;font-size:12.5px;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + f.name + '</span>'
+           + '<span style="font-size:11px;color:#94a3b8;flex-shrink:0;">' + (f.size/1024).toFixed(0) + ' KB</span>'
+           + '<button type="button" data-idx="' + i + '" style="background:none;border:none;color:#94a3b8;'
            + 'cursor:pointer;font-size:15px;line-height:1;padding:0 2px;flex-shrink:0;" title="Remove">✕</button>'
            + '</div>';
     }).join('');

@@ -8,8 +8,8 @@
   .info-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:16px; }
   .var-pills { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
   .var-pill { background:#1a2a1a; color:#8bc34a; border:1px solid #2a4a2a; border-radius:6px; padding:3px 10px; font-size:12px; font-family:monospace; }
-  .var-pill span { color:#666; margin-right:4px; }
-  .msg-preview { background:#111; border:1px solid var(--border); border-radius:10px; padding:14px 16px; font-size:13px; color:#aaa; white-space:pre-wrap; line-height:1.7; }
+  .var-pill span { color:#94a3b8; margin-right:4px; }
+  .msg-preview { background:#f8fafc; border:1px solid var(--border); border-radius:10px; padding:14px 16px; font-size:13px; color:#475569; white-space:pre-wrap; line-height:1.7; }
 
   .drop-zone { border:2px dashed var(--border); border-radius:10px; padding:28px 16px; text-align:center; cursor:pointer; transition:border-color .2s, background .2s; }
   .drop-zone:hover, .drop-zone.drag-over { border-color:var(--amber); background:rgba(251,191,36,.04); }
@@ -17,19 +17,19 @@
   .phone-list-wrap { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
   .phone-list-head { padding:14px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
   .phone-count-badge { background:var(--amber); color:#000; font-size:11px; font-weight:700; padding:2px 8px; border-radius:99px; }
-  .phone-textarea { width:100%; box-sizing:border-box; background:#0e0e0e; border:none; outline:none; color:#ccc; font-family:monospace; font-size:13px; line-height:1.8; padding:14px 16px; resize:vertical; min-height:260px; max-height:440px; }
-  .phone-textarea::placeholder { color:#333; }
+  .phone-textarea { width:100%; box-sizing:border-box; background:#ffffff; border:none; outline:none; color:#1e293b; font-family:monospace; font-size:13px; line-height:1.8; padding:14px 16px; resize:vertical; min-height:260px; max-height:440px; }
+  .phone-textarea::placeholder { color:#94a3b8; }
   .manual-add { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--border); background:var(--card); }
-  .manual-add input { flex:1; background:#111; border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:#ccc; font-family:monospace; font-size:13px; outline:none; }
+  .manual-add input { flex:1; background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:#1e293b; font-family:monospace; font-size:13px; outline:none; }
   .manual-add input:focus { border-color:var(--amber); }
 
-  .pill-bar { display:flex; gap:8px; flex-wrap:wrap; padding:10px 16px; border-bottom:1px solid var(--border); background:#0e0e0e; }
-  .pill-num { background:#1a1a1a; border:1px solid var(--border); border-radius:20px; padding:3px 10px 3px 12px; font-size:12px; font-family:monospace; color:#aaa; display:flex; align-items:center; gap:6px; }
-  .pill-num button { background:none; border:none; color:#555; cursor:pointer; font-size:12px; padding:0; line-height:1; }
+  .pill-bar { display:flex; gap:8px; flex-wrap:wrap; padding:10px 16px; border-bottom:1px solid var(--border); background:#ffffff; }
+  .pill-num { background:#f8fafc; border:1px solid var(--border); border-radius:20px; padding:3px 10px 3px 12px; font-size:12px; font-family:monospace; color:#475569; display:flex; align-items:center; gap:6px; }
+  .pill-num button { background:none; border:none; color:#94a3b8; cursor:pointer; font-size:12px; padding:0; line-height:1; }
   .pill-num button:hover { color:#ef4444; }
 </style>
 
-<a href="{{ url_for('campaigns') }}" style="color:#666;font-size:13px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:14px;">← Back to Campaigns</a>
+<a href="{{ url_for('campaigns') }}" style="color:#94a3b8;font-size:13px;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-bottom:14px;">← Back to Campaigns</a>
 
 <form method="POST" id="sendForm">
   <input type="hidden" name="phones_json" id="phonesJson">
@@ -40,8 +40,8 @@
     <div>
       <!-- Campaign info -->
       <div class="info-card">
-        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;color:#ddd;">🎯 {{ campaign.name }}</div>
-        <div style="font-size:12px;color:#666;margin-top:3px;">Template: <strong style="color:#aaa;">{{ campaign.template_name }}</strong></div>
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;color:#0f172a;">🎯 {{ campaign.name }}</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:3px;">Template: <strong style="color:#475569;">{{ campaign.template_name }}</strong></div>
         {% if campaign.variables %}
         <div class="var-pills">
           {% for v in campaign.variables %}
@@ -51,7 +51,7 @@
         {% endif %}
         {% if template and template.body %}
         <div style="margin-top:12px;">
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Message Preview</div>
+          <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Message Preview</div>
           <div class="msg-preview" id="msgPreview">{{ template.body }}</div>
         </div>
         {% endif %}
@@ -59,18 +59,18 @@
 
       <!-- File upload -->
       <div class="info-card">
-        <div style="font-size:14px;font-weight:600;color:#ddd;margin-bottom:4px;">📂 Upload File to Extract Numbers</div>
-        <div style="font-size:12px;color:#666;margin-bottom:12px;">CSV, Excel, TXT, WhatsApp export — numbers extracted automatically</div>
+        <div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:4px;">📂 Upload File to Extract Numbers</div>
+        <div style="font-size:12px;color:#94a3b8;margin-bottom:12px;">CSV, Excel, TXT, WhatsApp export — numbers extracted automatically</div>
 
         <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
           <div style="font-size:28px;margin-bottom:6px;">📁</div>
-          <div style="font-size:13px;color:#888;"><strong style="color:#ccc;">Click to upload</strong> or drag & drop</div>
-          <div style="font-size:11px;color:#555;margin-top:4px;">CSV · TXT · Excel (.xlsx) · VCF</div>
+          <div style="font-size:13px;color:#64748b;"><strong style="color:#1e293b;">Click to upload</strong> or drag & drop</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px;">CSV · TXT · Excel (.xlsx) · VCF</div>
           <input type="file" id="fileInput" multiple style="display:none;" onchange="handleFiles(this.files)">
         </div>
 
         <div id="fileList" style="margin-top:8px;"></div>
-        <div id="extractStatus" style="font-size:12px;color:#666;margin-top:8px;display:none;"></div>
+        <div id="extractStatus" style="font-size:12px;color:#94a3b8;margin-top:8px;display:none;"></div>
       </div>
     </div>
 
@@ -79,8 +79,8 @@
       <div class="phone-list-wrap">
         <div class="phone-list-head">
           <div>
-            <div style="font-size:14px;font-weight:600;color:#ddd;">📱 Phone Numbers</div>
-            <div style="font-size:12px;color:#666;margin-top:1px;">Edit freely — one number per line</div>
+            <div style="font-size:14px;font-weight:600;color:#0f172a;">📱 Phone Numbers</div>
+            <div style="font-size:12px;color:#94a3b8;margin-top:1px;">Edit freely — one number per line</div>
           </div>
           <span class="phone-count-badge" id="countBadge">0</span>
         </div>
@@ -98,8 +98,8 @@
         </div>
       </div>
 
-      <div style="margin-top:14px;padding:12px 16px;background:#111;border-radius:10px;font-size:12px;color:#555;line-height:1.8;">
-        <strong style="color:#888;">Tips:</strong><br>
+      <div style="margin-top:14px;padding:12px 16px;background:#f8fafc;border-radius:10px;font-size:12px;color:#94a3b8;line-height:1.8;">
+        <strong style="color:#64748b;">Tips:</strong><br>
         • Each line = one number (10 or 12 digits)<br>
         • Delete a line to remove a number<br>
         • Paste a whole list at once<br>
@@ -198,10 +198,10 @@ function handleFiles(files) {
 function renderFileList() {
   var html = '';
   fileStore.forEach(function(f, i) {
-    html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#111;border-radius:6px;margin-bottom:3px;font-size:12px;color:#ccc;">' +
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#f8fafc;border-radius:6px;margin-bottom:3px;font-size:12px;color:#1e293b;">' +
             '📄 ' + f.name +
-            '<span style="color:#555;margin-left:auto;">' + (f.size/1024).toFixed(1) + 'KB</span>' +
-            '<button type="button" onclick="removeFile(' + i + ')" style="background:none;border:none;color:#555;cursor:pointer;">✕</button></div>';
+            '<span style="color:#94a3b8;margin-left:auto;">' + (f.size/1024).toFixed(1) + 'KB</span>' +
+            '<button type="button" onclick="removeFile(' + i + ')" style="background:none;border:none;color:#94a3b8;cursor:pointer;">✕</button></div>';
   });
   document.getElementById('fileList').innerHTML = html;
 }

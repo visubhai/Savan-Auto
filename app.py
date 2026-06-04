@@ -27,6 +27,48 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "savan-travels-localhost-secret-2024")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB
 
+
+# ── gzip compression — typical HTML payloads shrink ~70% ────────────────────
+@app.after_request
+def _gzip_response(resp):
+    """Compress textual responses when the client supports gzip."""
+    # Skip if already encoded, streaming, or too small to be worth it
+    if (
+        resp.direct_passthrough
+        or resp.headers.get("Content-Encoding")
+        or "gzip" not in (request.headers.get("Accept-Encoding") or "")
+        or (resp.content_length or 0) < 512
+    ):
+        return resp
+    ct = (resp.content_type or "").split(";")[0].strip().lower()
+    if not (ct.startswith("text/") or ct in (
+        "application/json", "application/javascript",
+        "application/xml", "image/svg+xml",
+    )):
+        return resp
+    try:
+        import gzip
+        data = resp.get_data()
+        gz = gzip.compress(data, compresslevel=6)
+        if len(gz) >= len(data):
+            return resp  # not worth it
+        resp.set_data(gz)
+        resp.headers["Content-Encoding"] = "gzip"
+        resp.headers["Content-Length"] = str(len(gz))
+        vary = resp.headers.get("Vary")
+        resp.headers["Vary"] = (vary + ", Accept-Encoding") if vary else "Accept-Encoding"
+    except Exception:
+        pass
+    return resp
+
+
+# ── light caching for static assets ────────────────────────────────────────
+@app.after_request
+def _cache_static(resp):
+    if request.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
 # FIX 1: Use filesystem session storage for large CSVs instead of cookie
 # Store pending passengers in a temp file, only store path in session
 TEMP_DIR = os.path.join(os.path.dirname(__file__), "uploads")

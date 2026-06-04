@@ -23,7 +23,7 @@
   <!-- Today sent -->
   <div class="card stat-card fade-in" style="animation-delay:0.0s;">
     <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;color:var(--muted);text-transform:uppercase;margin-bottom:10px;">Today — Sent</div>
-    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:36px;font-weight:800;color:#fff;line-height:1;">{{ today.sent }}</div>
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:36px;font-weight:800;color:var(--text);line-height:1;">{{ today.sent }}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:4px;">₹{{ today.cost }} spent</div>
     {% if today.failed > 0 %}
     <div style="font-size:12px;color:#f87171;margin-top:2px;">{{ today.failed }} failed</div>
@@ -33,7 +33,7 @@
   <!-- This month -->
   <div class="card stat-card fade-in" style="animation-delay:0.07s;">
     <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;color:var(--muted);text-transform:uppercase;margin-bottom:10px;">This Month — Sent</div>
-    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:36px;font-weight:800;color:#fff;line-height:1;">{{ month.sent }}</div>
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:36px;font-weight:800;color:var(--text);line-height:1;">{{ month.sent }}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:4px;">₹{{ month.cost }} spent</div>
   </div>
 
@@ -65,7 +65,9 @@
         <span style="display:inline-block;width:8px;height:8px;background:#ef4444;border-radius:2px;margin-left:8px;margin-right:4px;"></span>Failed
       </div>
     </div>
-    <canvas id="weekChart" style="width:100%;height:160px;"></canvas>
+    <div style="position:relative;height:160px;width:100%;">
+      <canvas id="weekChart"></canvas>
+    </div>
   </div>
 
   <!-- Top routes -->
@@ -75,7 +77,7 @@
       {% for r in top_routes %}
       <div style="margin-bottom:12px;">
         <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px;">
-          <span style="color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">{{ r.route or 'Unknown' }}</span>
+          <span style="color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;">{{ r.route or 'Unknown' }}</span>
           <span style="color:var(--amber);font-weight:600;margin-left:8px;">{{ r.count }}</span>
         </div>
         <div class="progress-track">
@@ -110,8 +112,8 @@
       <tbody>
         {% for m in recent %}
         <tr>
-          <td style="font-weight:500;color:#e0e0e0;">{{ m.customer_name or '—' }}</td>
-          <td style="font-family:monospace;font-size:12px;color:#888;">{{ m.customer_phone }}</td>
+          <td style="font-weight:500;color:#0f172a;">{{ m.customer_name or '—' }}</td>
+          <td style="font-family:monospace;font-size:12px;color:#64748b;">{{ m.customer_phone }}</td>
           <td>{{ m.route or '—' }}</td>
           <td>{{ m.platform or '—' }}</td>
           <td>
@@ -133,7 +135,10 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- Chart.js loaded only on Dashboard (no longer in base.html) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
 <script>
+window.addEventListener('load', function() {
 const chartData = {{ chart|tojson }};
 const ctx = document.getElementById('weekChart')?.getContext('2d');
 if (ctx) {
@@ -145,7 +150,7 @@ if (ctx) {
         {
           label: 'Sent',
           data: chartData.map(d => d.sent),
-          backgroundColor: 'rgba(245,158,11,0.7)',
+          backgroundColor: 'rgba(234,88,12,0.85)',
           borderRadius: 5,
           borderSkipped: false,
         },
@@ -161,13 +166,14 @@ if (ctx) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#1f1f1f', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1, titleColor: '#aaa', bodyColor: '#fff', padding: 10 } },
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0f172a', titleColor: '#cbd5e1', bodyColor: '#fff', padding: 10, borderWidth: 0, cornerRadius: 6 } },
       scales: {
-        x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', font: { size: 11 } } },
-        y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#666', font: { size: 11 }, precision: 0 }, beginAtZero: true },
+        x: { grid: { color: '#f1f5f9' }, ticks: { color: '#64748b', font: { size: 11 } } },
+        y: { grid: { color: '#f1f5f9' }, ticks: { color: '#64748b', font: { size: 11 }, precision: 0 }, beginAtZero: true },
       }
     }
   });
 }
+});  // window.load
 </script>
 {% endblock %}

@@ -6,9 +6,9 @@
 <style>
   .review-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; max-width:1000px; }
   .panel       { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px; }
-  .panel h3    { font-family:'Bricolage Grotesque',sans-serif; font-size:16px; font-weight:700; color:#ddd; margin-bottom:6px; }
-  .panel .sub  { font-size:12.5px; color:#666; margin-bottom:18px; line-height:1.5; }
-  .step        { display:flex; gap:10px; font-size:12.5px; color:#888; line-height:1.55; margin-bottom:6px; }
+  .panel h3    { font-family:'Bricolage Grotesque',sans-serif; font-size:16px; font-weight:700; color:#0f172a; margin-bottom:6px; }
+  .panel .sub  { font-size:12.5px; color:#94a3b8; margin-bottom:18px; line-height:1.5; }
+  .step        { display:flex; gap:10px; font-size:12.5px; color:#64748b; line-height:1.55; margin-bottom:6px; }
   .step .num   { width:20px; height:20px; border-radius:50%; background:rgba(245,158,11,0.15); color:var(--amber); font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; }
   .drop        { border:2px dashed var(--border); border-radius:10px; padding:28px 14px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
   .drop:hover, .drop.drag-over { border-color:var(--amber); background:rgba(245,158,11,0.04); }
@@ -33,8 +33,8 @@
         on the <a href="{{ url_for('settings') }}">Settings page</a>.
       </div>
     {% else %}
-      <div style="font-size:12.5px;color:#888;margin-bottom:14px;">
-        Reading from <strong style="color:#ccc;">{{ gmail_address }}</strong>
+      <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">
+        Reading from <strong style="color:#1e293b;">{{ gmail_address }}</strong>
         {% if gmail_sender_filter or gmail_subject_filter %}
           · filter
           {% if gmail_sender_filter %}<code style="color:var(--amber);">from:{{ gmail_sender_filter }}</code>{% endif %}
@@ -60,7 +60,7 @@
       </button>
     </form>
 
-    <div style="font-size:11.5px;color:#555;margin-top:14px;line-height:1.6;">
+    <div style="font-size:11.5px;color:#94a3b8;margin-top:14px;line-height:1.6;">
       Each fetch marks the email as read and remembers its UID so the next
       fetch only picks up newer ones. You won't get the same review file twice.
     </div>
@@ -74,8 +74,8 @@
     <form method="POST" action="{{ url_for('reviews_upload') }}" enctype="multipart/form-data" id="reviewUploadForm">
       <label for="reviewFile" class="drop" id="reviewDrop">
         <div style="font-size:32px;margin-bottom:6px;">⬆</div>
-        <div style="font-size:13px;color:#888;"><strong style="color:#ccc;">Click to choose file</strong> or drag & drop</div>
-        <div style="font-size:11px;color:#555;margin-top:4px;">CSV / Excel from RedPro RnR export</div>
+        <div style="font-size:13px;color:#64748b;"><strong style="color:#1e293b;">Click to choose file</strong> or drag & drop</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">CSV / Excel from RedPro RnR export</div>
         <input id="reviewFile" type="file" name="review_file" style="display:none;" onchange="document.getElementById('reviewUploadForm').submit()">
       </label>
       <div class="row" style="margin-top:14px;">

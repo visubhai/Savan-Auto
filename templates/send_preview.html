@@ -11,7 +11,7 @@
   <!-- Parse summary cards -->
   <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px;">
     <div class="card2" style="padding:14px;text-align:center;">
-      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#fff;" id="totalRows">{{ pending.stats.total_rows }}</div>
+      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:var(--text);" id="totalRows">{{ pending.stats.total_rows }}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:3px;">Total rows</div>
     </div>
     <div class="card2" style="padding:14px;text-align:center;">
@@ -23,7 +23,7 @@
       <div style="font-size:11px;color:var(--muted);margin-top:3px;">Duplicates</div>
     </div>
     <div class="card2" style="padding:14px;text-align:center;">
-      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#888;">{{ pending.stats.invalid }}</div>
+      <div style="font-size:22px;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;color:#64748b;">{{ pending.stats.invalid }}</div>
       <div style="font-size:11px;color:var(--muted);margin-top:3px;">Filtered</div>
     </div>
     <div class="card" style="padding:14px;text-align:center;border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.05);">
@@ -52,11 +52,11 @@
         </div>
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
           <span style="font-size:12px;color:var(--muted);">Est. cost</span>
-          <span style="font-size:14px;font-weight:700;color:#fff;" id="estCost">₹{{ estimated_cost }}</span>
+          <span style="font-size:14px;font-weight:700;color:var(--text);" id="estCost">₹{{ estimated_cost }}</span>
         </div>
         <div style="display:flex;justify-content:space-between;">
           <span style="font-size:12px;color:var(--muted);">Est. time</span>
-          <span style="font-size:14px;font-weight:700;color:#fff;" id="estTime">{{ estimated_mins }} min</span>
+          <span style="font-size:14px;font-weight:700;color:var(--text);" id="estTime">{{ estimated_mins }} min</span>
         </div>
       </div>
 
@@ -71,13 +71,13 @@
           {% endfor %}
         </select>
         <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:6px;">Preview</div>
-        <pre style="font-size:11.5px;color:#bbb;white-space:pre-wrap;line-height:1.6;margin:0;max-height:140px;overflow-y:auto;" id="tplBody">{% if default_tpl %}{{ default_tpl.body }}{% endif %}</pre>
+        <pre style="font-size:11.5px;color:#475569;white-space:pre-wrap;line-height:1.6;margin:0;max-height:140px;overflow-y:auto;" id="tplBody">{% if default_tpl %}{{ default_tpl.body }}{% endif %}</pre>
 
         <!-- Variable values for this batch -->
         <div id="varOverrideSection" style="margin-top:14px;display:none;border-top:1px solid var(--border);padding-top:12px;">
           <div style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:8px;">Variable values</div>
           <div id="varOverrideFields"></div>
-          <div style="font-size:10.5px;color:#666;line-height:1.5;margin-top:2px;">Leave auto fields blank to use each passenger's own data. Fill amber fields with one value used for everyone.</div>
+          <div style="font-size:10.5px;color:#94a3b8;line-height:1.5;margin-top:2px;">Leave auto fields blank to use each passenger's own data. Fill amber fields with one value used for everyone.</div>
         </div>
       </div>
 
@@ -128,7 +128,7 @@
       </div>
       <div style="overflow-x:auto;max-height:600px;overflow-y:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:12.5px;" id="passengerTable">
-          <thead style="position:sticky;top:0;background:#1a1a1a;z-index:2;">
+          <thead style="position:sticky;top:0;background:#f8fafc;z-index:2;">
             <tr>
               <th style="padding:9px 10px;text-align:center;width:36px;">
                 <input type="checkbox" id="checkAll" checked style="cursor:pointer;" onchange="toggleAll(this.checked)">
@@ -142,22 +142,22 @@
           </thead>
           <tbody id="passengerBody">
             {% for p in pending.passengers %}
-            <tr data-idx="{{ loop.index0 }}" class="pax-row" style="border-bottom:1px solid rgba(255,255,255,0.03);">
+            <tr data-idx="{{ loop.index0 }}" class="pax-row" style="border-bottom:1px solid rgba(15,23,42,0.03);">
               <td style="padding:7px 10px;text-align:center;">
                 <input type="checkbox" class="pax-check" checked style="cursor:pointer;">
               </td>
               <td style="padding:7px 10px;color:var(--muted);font-size:11px;">{{ loop.index }}</td>
               <td style="padding:7px 10px;">
-                <div class="editable" data-field="name" style="color:#e0e0e0;font-weight:500;cursor:text;min-width:80px;">{{ p.name }}</div>
+                <div class="editable" data-field="name" style="color:#0f172a;font-weight:500;cursor:text;min-width:80px;">{{ p.name }}</div>
               </td>
               <td style="padding:7px 10px;">
-                <div class="editable" data-field="phone" style="font-family:monospace;font-size:11.5px;color:#888;cursor:text;min-width:100px;">{{ p.phone }}</div>
+                <div class="editable" data-field="phone" style="font-family:monospace;font-size:11.5px;color:#64748b;cursor:text;min-width:100px;">{{ p.phone }}</div>
               </td>
               <td style="padding:7px 10px;">
-                <div class="editable" data-field="route" style="color:#aaa;cursor:text;min-width:120px;">{{ p.route or '—' }}</div>
+                <div class="editable" data-field="route" style="color:#475569;cursor:text;min-width:120px;">{{ p.route or '—' }}</div>
               </td>
               <td style="padding:7px 10px;">
-                <div class="editable" data-field="platform" style="color:#aaa;cursor:text;min-width:80px;">{{ p.platform or '—' }}</div>
+                <div class="editable" data-field="platform" style="color:#475569;cursor:text;min-width:80px;">{{ p.platform or '—' }}</div>
               </td>
             </tr>
             {% endfor %}
@@ -172,8 +172,8 @@
 
 <style>
 .editable { border-radius:4px; padding:2px 4px; transition:background 0.1s; }
-.editable:hover { background:rgba(255,255,255,0.05); }
-.editable.editing { background:#2a2a2a; outline:1px solid var(--amber); }
+.editable:hover { background:rgba(15,23,42,0.04); }
+.editable.editing { background:#e2e8f0; outline:1px solid var(--amber); }
 .pax-row.skip-row { opacity:0.35; }
 .pax-row.skip-row td:not(:first-child) { text-decoration:line-through; }
 </style>

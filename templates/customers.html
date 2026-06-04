@@ -28,7 +28,7 @@
 
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding:0 2px;">
   <div style="font-size:13px;color:var(--muted);">
-    <strong style="color:#ccc;">{{ total }}</strong> customers total
+    <strong style="color:#1e293b;">{{ total }}</strong> customers total
   </div>
 </div>
 
@@ -50,8 +50,8 @@
       <tbody>
         {% for c in customers %}
         <tr>
-          <td style="font-weight:500;color:#e0e0e0;">{{ c.name or '—' }}</td>
-          <td style="font-family:monospace;font-size:12px;color:#888;">{{ c.phone }}</td>
+          <td style="font-weight:500;color:#0f172a;">{{ c.name or '—' }}</td>
+          <td style="font-family:monospace;font-size:12px;color:#64748b;">{{ c.phone }}</td>
           <td style="font-size:12.5px;">{{ c.last_route or '—' }}</td>
           <td style="font-size:12.5px;">{{ c.last_platform or '—' }}</td>
           <td style="text-align:center;font-weight:600;color:var(--amber);">{{ c.total_messages }}</td>
