@@ -37,7 +37,7 @@ if not MONGO_URI:
         get_batch_messages, get_failed_messages, get_phone_messages,
         get_recent_recipients,
         get_today_stats, get_month_stats, get_chart_data,
-        get_recent_sends, get_top_routes,
+        get_today_conversations, get_recent_sends, get_top_routes,
         create_scheduled_job, list_scheduled_jobs,
         get_due_jobs, update_scheduled_job, delete_scheduled_job,
         create_campaign, list_campaigns, get_campaign, update_campaign,
@@ -448,6 +448,19 @@ else:
             .sort("sent_at", ASCENDING)
             .limit(limit)
         )
+
+    def get_today_conversations():
+        """Count of UNIQUE customer phones we successfully sent to today (IST).
+
+        This matches WhatsApp's "business-initiated conversations" metric
+        that counts against your messaging tier — one conversation per
+        24-hour window per customer.
+        """
+        today = _today()  # 'YYYY-MM-DD' in IST
+        return len(_db().messages.distinct(
+            "customer_phone",
+            {"status": "sent", "sent_at": {"$gte": today}},
+        ))
 
     def get_recent_recipients(days=30, template_name=None, status="sent"):
         """Return one row per unique phone we've successfully sent to in the

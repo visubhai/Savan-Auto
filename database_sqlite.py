@@ -503,6 +503,17 @@ def get_phone_messages(phone, limit=200):
         ).fetchall()
 
 
+def get_today_conversations():
+    """Count of UNIQUE customer phones we successfully sent to today (IST)."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT COUNT(DISTINCT customer_phone) AS c FROM messages "
+            "WHERE status='sent' "
+            "AND date(sent_at)=date('now', '+330 minutes')"
+        ).fetchone()
+        return row["c"] if row else 0
+
+
 def get_recent_recipients(days=30, template_name=None, status="sent"):
     """One row per unique phone we've successfully sent to in the last
     `days` days, with the latest message's metadata.

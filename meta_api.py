@@ -118,6 +118,50 @@ class WhatsAppAPI:
         except Exception as e:
             return False, str(e)
 
+    def get_phone_info(self):
+        """Fetch tier + quality info for the configured phone number.
+
+        Returns a dict like:
+          {
+            "messaging_limit_tier": "TIER_1K",   # one of TIER_50/250/1K/10K/100K/UNLIMITED
+            "verified_name": "Savan Travels",
+            "display_phone_number": "+91 7567 529300",
+            "quality_rating": "GREEN",            # GREEN / YELLOW / RED
+            "tier_limit": 1000,                   # numeric, None for unlimited
+          }
+        or {"error": "..."} on failure.
+        """
+        if not self.is_configured():
+            return {"error": "API not configured"}
+        try:
+            r = requests.get(
+                f"{self.base_url}/{self.phone_number_id}",
+                headers=self.headers,
+                params={
+                    "fields": "messaging_limit_tier,verified_name,display_phone_number,quality_rating,name_status"
+                },
+                timeout=10,
+            )
+            if r.status_code != 200:
+                return {"error": f"HTTP {r.status_code}: {r.text[:200]}"}
+            data = r.json()
+            # Map tier string → numeric daily limit for "unique business-initiated
+            # conversations" (Meta's quota; service replies don't count here).
+            tier_map = {
+                "TIER_50":         50,
+                "TIER_250":        250,
+                "TIER_1K":         1_000,
+                "TIER_10K":        10_000,
+                "TIER_100K":       100_000,
+                "TIER_UNLIMITED":  None,
+            }
+            data["tier_limit"] = tier_map.get(
+                (data.get("messaging_limit_tier") or "").upper(), None
+            )
+            return data
+        except Exception as e:
+            return {"error": str(e)}
+
     def download_media(self, media_id):
         """Download an incoming media file by its media_id.
 

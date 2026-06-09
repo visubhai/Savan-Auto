@@ -53,6 +53,40 @@
 
 </div>
 
+<!-- WhatsApp messaging limit card (live from Meta) -->
+<div class="card fade-in" id="waLimitCard" style="padding:20px 22px;margin-bottom:22px;animation-delay:0.24s;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+    <div>
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:16px;font-weight:700;">
+        📱 WhatsApp Messaging Limit
+        <span id="waTier" style="display:inline-block;background:var(--primary-dim);color:var(--primary-dark);font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:6px;vertical-align:middle;">…</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px;" id="waSubtitle">Checking with Meta…</div>
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="loadWaLimit()" id="waRefresh">↻ Refresh</button>
+  </div>
+
+  <!-- Progress bar -->
+  <div style="display:flex;align-items:center;gap:14px;">
+    <div style="flex:1;">
+      <div class="progress-track" style="height:10px;">
+        <div class="progress-fill" id="waBar" style="width:0%;background:linear-gradient(90deg,#16a34a,#22c55e);"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--muted);">
+        <span><strong style="color:var(--text);font-size:13.5px;" id="waUsed">—</strong> used today</span>
+        <span><strong style="color:var(--text);font-size:13.5px;" id="waRemaining">—</strong> remaining</span>
+        <span><strong style="color:var(--text);font-size:13.5px;" id="waLimit">—</strong> tier limit</span>
+      </div>
+    </div>
+    <div style="text-align:right;font-size:11.5px;color:var(--muted);min-width:90px;">
+      Quality:<br>
+      <span id="waQuality" style="font-weight:700;font-size:13px;color:var(--success);">—</span>
+    </div>
+  </div>
+
+  <div id="waError" style="display:none;margin-top:10px;font-size:12px;color:var(--error);background:#fee2e2;border:1px solid #fecaca;border-radius:6px;padding:8px 12px;"></div>
+</div>
+
 <!-- Chart + Top Routes row -->
 <div style="display:grid;grid-template-columns:1fr 280px;gap:14px;margin-bottom:22px;">
 
@@ -175,5 +209,50 @@ if (ctx) {
   });
 }
 });  // window.load
+
+// WhatsApp messaging-limit card — populated from /api/dashboard/wa-limit
+function fmt(n){ return n == null ? '—' : (typeof n === 'number' ? n.toLocaleString('en-IN') : n); }
+
+function loadWaLimit() {
+  var btn = document.getElementById('waRefresh');
+  btn.disabled = true; btn.textContent = '…';
+  var err = document.getElementById('waError'); err.style.display = 'none';
+  fetch('/api/dashboard/wa-limit')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      btn.disabled = false; btn.textContent = '↻ Refresh';
+      if (!d.ok) {
+        err.textContent = '⚠ ' + (d.error || 'Could not fetch from Meta');
+        err.style.display = '';
+        document.getElementById('waSubtitle').textContent = 'Add WhatsApp API token in Settings to enable.';
+        document.getElementById('waTier').textContent = 'Not configured';
+        return;
+      }
+      document.getElementById('waTier').textContent = d.tier_label;
+      document.getElementById('waSubtitle').textContent =
+        (d.verified_name ? d.verified_name + ' · ' : '') + (d.display_phone || '');
+      document.getElementById('waUsed').textContent      = fmt(d.used);
+      document.getElementById('waRemaining').textContent = d.remaining == null ? '∞' : fmt(d.remaining);
+      document.getElementById('waLimit').textContent     = d.limit == null ? 'Unlimited' : fmt(d.limit);
+      document.getElementById('waBar').style.width       = d.percent + '%';
+      // Bar colour based on usage
+      var bar = document.getElementById('waBar');
+      if (d.percent >= 90)      bar.style.background = 'linear-gradient(90deg,#dc2626,#ef4444)';
+      else if (d.percent >= 70) bar.style.background = 'linear-gradient(90deg,#ea580c,#f97316)';
+      else                      bar.style.background = 'linear-gradient(90deg,#16a34a,#22c55e)';
+      // Quality rating colour
+      var q = document.getElementById('waQuality');
+      q.textContent = d.quality || '—';
+      q.style.color = (d.quality === 'GREEN') ? 'var(--success)' :
+                      (d.quality === 'YELLOW') ? '#ca8a04' :
+                      (d.quality === 'RED') ? 'var(--error)' : 'var(--muted)';
+    })
+    .catch(function(e) {
+      btn.disabled = false; btn.textContent = '↻ Refresh';
+      err.textContent = '⚠ ' + e.message;
+      err.style.display = '';
+    });
+}
+loadWaLimit();
 </script>
 {% endblock %}

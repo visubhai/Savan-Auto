@@ -1250,6 +1250,21 @@ def webhook_receive():
                     elif msg_type == "location":
                         loc = msg.get("location", {})
                         content = f"[Location: {loc.get('latitude')}, {loc.get('longitude')}]"
+                    elif msg_type == "reaction":
+                        rx = msg.get("reaction", {})
+                        emoji = rx.get("emoji", "")
+                        content = (emoji + " (reacted)") if emoji else "(removed reaction)"
+                    elif msg_type == "button":
+                        btn = msg.get("button", {})
+                        content = f"🔘 {btn.get('text','') or btn.get('payload','') or 'Button reply'}"
+                    elif msg_type == "interactive":
+                        inter = msg.get("interactive", {})
+                        if inter.get("type") == "button_reply":
+                            content = f"🔘 {inter.get('button_reply',{}).get('title','Button reply')}"
+                        elif inter.get("type") == "list_reply":
+                            content = f"📋 {inter.get('list_reply',{}).get('title','List reply')}"
+                        else:
+                            content = f"[{msg_type}]"
                     else:
                         content = f"[{msg_type}]"
 
@@ -1471,6 +1486,40 @@ def inbox_poll():
 @login_required
 def inbox_unread():
     return jsonify({"count": db.get_unread_count()})
+
+
+@app.route("/api/dashboard/wa-limit")
+@login_required
+def dashboard_wa_limit():
+    """Live tier + usage info for the WhatsApp limit card on the dashboard."""
+    api = WhatsAppAPI()
+    info = api.get_phone_info() or {}
+    if info.get("error"):
+        return jsonify({"ok": False, "error": info["error"]})
+
+    used  = db.get_today_conversations()
+    limit = info.get("tier_limit")  # None when unlimited
+    tier  = info.get("messaging_limit_tier") or "UNKNOWN"
+
+    if limit:
+        remaining = max(0, limit - used)
+        pct = min(100, round(used * 100 / limit)) if limit else 0
+    else:
+        remaining = None
+        pct = 0
+
+    return jsonify({
+        "ok":            True,
+        "tier":          tier,
+        "tier_label":    tier.replace("TIER_", "").replace("_", " "),
+        "limit":         limit,
+        "used":          used,
+        "remaining":     remaining,
+        "percent":       pct,
+        "quality":       info.get("quality_rating", "—"),
+        "display_phone": info.get("display_phone_number", ""),
+        "verified_name": info.get("verified_name", ""),
+    })
 
 
 @app.route("/media/<int:chat_id>")
