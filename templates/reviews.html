@@ -4,139 +4,136 @@
 
 {% block content %}
 <style>
-  .rv-wrap     { max-width:1000px; }
-  .rv-hero     { padding:24px 26px; margin-bottom:18px; }
-  .rv-hero h2  { font-family:'Bricolage Grotesque',sans-serif; font-size:22px; font-weight:800; color:var(--text); margin-bottom:6px; }
-  .rv-hero p   { font-size:13.5px; color:var(--muted); line-height:1.6; max-width:680px; }
+  .rv-wrap    { max-width:820px; margin:0 auto; }
+  .rv-hero    { padding:28px 30px; margin-bottom:18px; text-align:center; }
+  .rv-hero .em { font-size:42px; margin-bottom:10px; }
+  .rv-hero h2  { font-family:'Bricolage Grotesque',sans-serif; font-size:22px; font-weight:800; color:var(--text); margin-bottom:8px; }
+  .rv-hero p   { font-size:13.5px; color:var(--muted); line-height:1.6; max-width:560px; margin:0 auto; }
 
-  .rv-main     { display:grid; grid-template-columns:1.6fr 1fr; gap:18px; align-items:stretch; margin-bottom:18px; }
-  .rv-panel    { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px; box-shadow:0 1px 3px rgba(15,23,42,0.04); display:flex; flex-direction:column; }
-  .rv-panel-title { font-family:'Bricolage Grotesque',sans-serif; font-size:15px; font-weight:700; color:var(--text); margin-bottom:4px; display:flex; align-items:center; gap:8px; }
-  .rv-panel-sub   { font-size:12.5px; color:var(--muted); margin-bottom:18px; line-height:1.55; }
+  /* Gmail status bar */
+  .rv-status   { display:flex; align-items:center; gap:12px; padding:14px 18px; border-radius:10px; margin-bottom:18px; font-size:13px; line-height:1.5; }
+  .rv-ok       { background:#dcfce7; border:1px solid #bbf7d0; color:#15803d; }
+  .rv-ok strong { color:#0f172a; }
+  .rv-warn     { background:var(--amber-dim); border:1px solid #fed7aa; color:#9a3412; }
+  .rv-warn a   { color:var(--amber); text-decoration:underline; font-weight:600; }
+  .rv-status .ic { font-size:22px; flex-shrink:0; }
+  .rv-status .body { flex:1; min-width:0; }
+  .rv-status code { background:rgba(15,23,42,0.05); padding:1px 6px; border-radius:4px; font-size:12px; }
 
-  /* Big drop zone */
-  .rv-drop     { flex:1; border:2px dashed #cbd5e1; border-radius:10px; padding:36px 18px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; background:#fafbfc; }
+  /* Big primary button */
+  .rv-fetch-btn { width:100%; padding:22px; font-size:17px; font-weight:700; justify-content:center; gap:10px; }
+  .rv-fetch-btn[disabled] { opacity:0.5; cursor:not-allowed; }
+  .rv-lookback { display:flex; align-items:center; gap:10px; margin-bottom:14px; font-size:13px; color:var(--muted); }
+  .rv-lookback input { width:80px; padding:6px 10px; font-size:13px; }
+
+  /* Secondary actions */
+  .rv-actions  { display:flex; justify-content:center; gap:24px; margin-top:18px; font-size:12.5px; }
+  .rv-actions a { color:var(--muted); text-decoration:none; cursor:pointer; }
+  .rv-actions a:hover { color:var(--primary); text-decoration:underline; }
+
+  /* Manual-upload (hidden by default) */
+  .rv-manual   { display:none; margin-top:18px; padding:18px; border:1px dashed var(--border); border-radius:10px; }
+  .rv-manual.show { display:block; animation:fadeIn 0.25s ease; }
+  .rv-drop     { border:2px dashed #cbd5e1; border-radius:10px; padding:22px 16px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; background:#fafbfc; }
   .rv-drop:hover, .rv-drop.drag-over { border-color:var(--amber); background:var(--amber-dim); }
-  .rv-drop .icon { font-size:36px; margin-bottom:8px; }
-  .rv-drop .title { font-size:14px; font-weight:600; color:var(--text); margin-bottom:4px; }
-  .rv-drop .hint  { font-size:11.5px; color:var(--muted); }
-
-  /* Gmail panel */
-  .rv-gmail-status { font-size:12px; padding:8px 12px; border-radius:8px; margin-bottom:12px; line-height:1.5; }
-  .rv-gmail-ok     { background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; }
-  .rv-gmail-off    { background:var(--amber-dim); color:var(--amber); border:1px solid #fed7aa; }
-  .rv-gmail-off a  { color:var(--amber); text-decoration:underline; font-weight:600; }
-  .rv-gmail-meta   { font-size:11.5px; color:var(--muted); margin-top:auto; line-height:1.55; }
 
   /* Steps */
-  .rv-steps    { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px 26px; }
-  .rv-steps h3 { font-family:'Bricolage Grotesque',sans-serif; font-size:15px; font-weight:700; margin-bottom:14px; }
-  .rv-step     { display:flex; gap:12px; align-items:flex-start; margin-bottom:10px; }
-  .rv-step:last-child { margin-bottom:0; }
-  .rv-step .num { width:22px; height:22px; border-radius:50%; background:var(--primary-dim); color:var(--primary-dark); font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; }
-  .rv-step .txt { font-size:13px; color:var(--text); line-height:1.6; }
-  .rv-step .txt .sub { color:var(--muted); font-size:12px; }
+  .rv-steps    { margin-top:18px; padding:22px 26px; }
+  .rv-steps h3 { font-family:'Bricolage Grotesque',sans-serif; font-size:14px; font-weight:700; margin-bottom:12px; color:var(--text); }
+  .rv-step     { display:flex; gap:12px; align-items:flex-start; margin-bottom:10px; font-size:12.5px; color:var(--muted); line-height:1.6; }
+  .rv-step strong { color:var(--text); }
+  .rv-step .num { width:20px; height:20px; border-radius:50%; background:var(--primary-dim); color:var(--primary-dark); font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; }
 </style>
 
 <div class="rv-wrap">
 
   <!-- Hero -->
   <div class="card rv-hero">
-    <h2>📨 Send review reminders to customers who haven't reviewed</h2>
+    <div class="em">📨</div>
+    <h2>Send review reminders, in one click</h2>
     <p>
-      Upload an Excel or CSV containing the customers you want to follow up with
-      (typically exported from your operator portal as a "no-review" / "pending-review" list).
-      We extract phones, names, routes and platforms automatically — you pick the
-      template and send.
+      Fetches the latest "pending review" Excel from your Gmail and sends a
+      follow-up template to those customers. No manual download or upload needed.
     </p>
   </div>
 
-  <!-- Two-panel main: upload (primary) + Gmail (secondary) -->
-  <div class="rv-main">
+  <div class="card" style="padding:24px 26px;">
 
-    <!-- Primary: drag & drop upload -->
-    <div class="rv-panel">
-      <div class="rv-panel-title">📁 Upload file</div>
-      <div class="rv-panel-sub">CSV, TSV or Excel (.xlsx). Phone column is required; name / route / platform are picked up automatically when present.</div>
+    <!-- Gmail status (configured or not) -->
+    {% if gmail_configured %}
+      <div class="rv-status rv-ok">
+        <div class="ic">✓</div>
+        <div class="body">
+          Connected to <strong>{{ gmail_address }}</strong>
+          {% if gmail_sender_filter or gmail_subject_filter %}
+            <br><span style="color:#15803d;">Looking for emails
+            {% if gmail_sender_filter %}from <code>{{ gmail_sender_filter }}</code>{% endif %}
+            {% if gmail_sender_filter and gmail_subject_filter %}with{% endif %}
+            {% if gmail_subject_filter %}subject containing <code>{{ gmail_subject_filter }}</code>{% endif %}
+            </span>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <div class="rv-status rv-warn">
+        <div class="ic">⚠</div>
+        <div class="body">
+          Gmail isn't connected yet. <a href="{{ url_for('settings') }}">Set it up in Settings →</a>
+          (takes 2 minutes — needs your Gmail address + a 16-char
+          <a href="https://myaccount.google.com/apppasswords" target="_blank">App Password</a>).
+        </div>
+      </div>
+    {% endif %}
 
-      <form method="POST" action="{{ url_for('reviews_upload') }}" enctype="multipart/form-data" id="reviewUploadForm" style="flex:1;display:flex;flex-direction:column;">
+    <!-- Lookback selector -->
+    <form method="POST" action="{{ url_for('reviews_fetch') }}" style="margin:0;">
+      <div class="rv-lookback">
+        <span>Look back over the last</span>
+        <input type="number" name="lookback_days" min="1" max="365" value="{{ default_lookback }}" class="input">
+        <span>days of unread emails</span>
+      </div>
+
+      <!-- BIG primary action -->
+      <button type="submit" class="btn btn-primary rv-fetch-btn"
+              {% if not gmail_configured %}disabled{% endif %}>
+        📥 Fetch latest review list from Gmail
+      </button>
+    </form>
+
+    <!-- Secondary links -->
+    <div class="rv-actions">
+      <a href="{{ url_for('settings') }}#gmail">↕ Configure Gmail filters</a>
+      <a onclick="document.getElementById('rvManual').classList.toggle('show')">📁 Or upload manually</a>
+    </div>
+
+    <!-- Manual upload (hidden by default) -->
+    <div class="rv-manual" id="rvManual">
+      <form method="POST" action="{{ url_for('reviews_upload') }}" enctype="multipart/form-data" id="reviewUploadForm">
         <label for="reviewFile" class="rv-drop" id="reviewDrop">
-          <div class="icon">⬆</div>
-          <div class="title">Click to choose file <span style="color:var(--muted);font-weight:500;">or drag &amp; drop</span></div>
-          <div class="hint">CSV · TSV · Excel (.xlsx)</div>
+          <div style="font-size:24px;margin-bottom:6px;">⬆</div>
+          <div style="font-size:13px;color:var(--text);font-weight:600;">Click to choose file or drag &amp; drop</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px;">CSV · TSV · Excel (.xlsx)</div>
           <input id="reviewFile" type="file" name="review_file" style="display:none;"
                  onchange="document.getElementById('reviewUploadForm').submit()">
         </label>
       </form>
     </div>
 
-    <!-- Secondary: Gmail auto-fetch -->
-    <div class="rv-panel">
-      <div class="rv-panel-title">📬 Or auto-fetch from Gmail</div>
-      <div class="rv-panel-sub">Pulls the most recent matching email's attachment and processes it like a manual upload.</div>
-
-      {% if not gmail_configured %}
-        <div class="rv-gmail-status rv-gmail-off">
-          Gmail not configured — add an
-          <a href="https://myaccount.google.com/apppasswords" target="_blank">App Password</a>
-          on the <a href="{{ url_for('settings') }}">Settings page</a> first.
-        </div>
-      {% else %}
-        <div class="rv-gmail-status rv-gmail-ok">
-          ✓ Reading from <strong>{{ gmail_address }}</strong>
-          {% if gmail_sender_filter %}<br>From&nbsp;<code style="color:var(--primary-dark);">{{ gmail_sender_filter }}</code>{% endif %}
-          {% if gmail_subject_filter %}<br>Subject contains&nbsp;<code style="color:var(--primary-dark);">{{ gmail_subject_filter }}</code>{% endif %}
-        </div>
-      {% endif %}
-
-      <form method="POST" action="{{ url_for('reviews_fetch') }}" style="margin:0;">
-        <label class="input-label" style="font-size:11px;">Look back over the last (days)</label>
-        <input type="number" name="lookback_days" min="1" max="365" value="{{ default_lookback }}" class="input" style="margin-bottom:12px;">
-        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;"
-                {% if not gmail_configured %}disabled{% endif %}>
-          📥 Fetch latest from Gmail
-        </button>
-      </form>
-
-      <div class="rv-gmail-meta">
-        Each fetch marks the email as read and remembers its UID — you won't get the same file twice.
-      </div>
-    </div>
   </div>
 
-  <!-- Steps -->
-  <div class="rv-steps">
-    <h3>How it works</h3>
-    <div class="rv-step">
-      <div class="num">1</div>
-      <div class="txt">
-        Upload your "pending-review customers" Excel/CSV (or fetch it from Gmail).
-        <div class="sub">The app reads any column layout — RedBus, AbhiBus, Paytm, MakeMyTrip, generic.</div>
-      </div>
-    </div>
-    <div class="rv-step">
-      <div class="num">2</div>
-      <div class="txt">
-        We extract phones, names, routes and platforms. Opted-out customers and duplicates are filtered automatically.
-      </div>
-    </div>
-    <div class="rv-step">
-      <div class="num">3</div>
-      <div class="txt">
-        On the next page (Send Preview), you can uncheck rows, see the cost estimate, and edit anything inline.
-      </div>
-    </div>
-    <div class="rv-step">
-      <div class="num">4</div>
-      <div class="txt">
-        Pick your <code style="color:var(--amber);">review_followup</code> template (auto-selected if it exists) and click <strong>Send</strong> — or <strong>Schedule</strong> for later.
-      </div>
-    </div>
+  <!-- How it works -->
+  <div class="card rv-steps">
+    <h3>How auto-fetch works</h3>
+    <div class="rv-step"><div class="num">1</div><div>Your operator portal emails the pending-review Excel to <strong>{{ gmail_address or 'your configured Gmail' }}</strong>.</div></div>
+    <div class="rv-step"><div class="num">2</div><div>You click <strong>Fetch latest review list from Gmail</strong>. We download the newest matching unread email's attachment automatically.</div></div>
+    <div class="rv-step"><div class="num">3</div><div>The app parses it, drops opted-out customers and duplicates, and lands on Send Preview with everyone loaded.</div></div>
+    <div class="rv-step"><div class="num">4</div><div>Your <code style="color:var(--amber);">review_followup</code> template is pre-selected. Hit Send (or Schedule).</div></div>
+    <div class="rv-step"><div class="num">5</div><div>Each email is marked as read and tracked by UID, so the next fetch only pulls newer ones — never the same file twice.</div></div>
   </div>
 </div>
 
 <script>
-  // Drag & drop highlight on the manual upload
+  // Drag & drop highlight on the (optional) manual upload
   (function() {
     var dz = document.getElementById('reviewDrop');
     var input = document.getElementById('reviewFile');
