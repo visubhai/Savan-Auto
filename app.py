@@ -1362,11 +1362,11 @@ def inbox():
     customer_name = ""
     templates     = [dict(t) for t in db.get_templates()] if active_phone else []
     if active_phone:
-        # Real two-way chat messages
-        chats = [dict(m) for m in db.get_conversation(active_phone, 200)]
-        # Bulk template sends to this phone (presented as outgoing bubbles
-        # with the actual rendered text, not just the template name).
-        bulk = [dict(m) for m in db.get_phone_messages(active_phone, 200)]
+        # Only the latest 50 of each on first paint — was 200 each which
+        # produced 6 MB HTML on busy chats. The user can rarely scroll
+        # 50 messages up anyway.
+        chats = [dict(m) for m in db.get_conversation(active_phone, 50)]
+        bulk  = [dict(m) for m in db.get_phone_messages(active_phone, 50)]
         bodies = {t["name"]: t.get("body", "") for t in templates}
         for b in bulk:
             tname = b.get("template_name", "")

@@ -123,6 +123,7 @@ else:
         db.chats.create_index([("phone", ASCENDING), ("id", ASCENDING)])      # poll: phone + id > after
         db.chats.create_index([("phone", ASCENDING), ("timestamp", ASCENDING)])  # conversation render
         db.chats.create_index([("direction", ASCENDING), ("read", ASCENDING)])   # unread count badge
+        db.chats.create_index([("timestamp", DESCENDING)])                       # list_conversations $sort
         db.chats.create_index("wa_message_id")                                # status callback lookup
         # Scheduled jobs scanner runs every 60s — make it cheap
         db.scheduled_jobs.create_index([("status", ASCENDING), ("scheduled_for", ASCENDING)])
@@ -648,27 +649,37 @@ else:
         )
 
     def list_conversations(limit=50):
+        # Single aggregation — was previously 1 aggregation + N count_documents
+        # queries (one per conversation) which on Atlas with 50 conversations
+        # cost ~5 seconds in round trips. Now it's one round trip.
         pipeline = [
             {"$sort": {"timestamp": DESCENDING}},
             {"$group": {
-                "_id": "$phone",
+                "_id":           "$phone",
                 "phone":         {"$first": "$phone"},
                 "customer_name": {"$first": "$customer_name"},
                 "content":       {"$first": "$content"},
                 "direction":     {"$first": "$direction"},
                 "timestamp":     {"$first": "$timestamp"},
                 "message_type":  {"$first": "$message_type"},
+                # Count unread incoming messages in the same pass
+                "unread": {
+                    "$sum": {
+                        "$cond": [
+                            {"$and": [
+                                {"$eq": ["$direction", "in"]},
+                                {"$eq": ["$read", 0]},
+                            ]},
+                            1, 0,
+                        ]
+                    }
+                },
             }},
             {"$sort": {"timestamp": DESCENDING}},
             {"$limit": limit},
         ]
         convos = list(_db().chats.aggregate(pipeline))
-
-        # Attach unread count per phone
         for c in convos:
-            c["unread"] = _db().chats.count_documents({
-                "phone": c["_id"], "direction": "in", "read": 0,
-            })
             c.pop("_id", None)
         return convos
 
