@@ -621,7 +621,7 @@ else:
     def save_chat_message(phone, customer_name, direction, content,
                            wa_message_id=None, message_type="text", status=None,
                            media_path=None, mime_type=None, filename=None,
-                           storage_kind=None):
+                           storage_kind=None, raw_payload=None):
         msg_id = _next_id("chats")
         _db().chats.insert_one({
             "id": msg_id,
@@ -638,6 +638,10 @@ else:
             "mime_type": mime_type,
             "filename": filename,
             "storage_kind": storage_kind or ("local" if media_path else None),
+            # Raw Meta webhook payload, kept as a JSON string. Acts as a
+            # backstop when content-parsing misses something (e.g. the emoji
+            # on a reaction). Only populated for non-text incoming messages.
+            "raw_payload": raw_payload,
         })
         return msg_id
 

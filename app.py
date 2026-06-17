@@ -1275,9 +1275,11 @@ def webhook_receive():
                         loc = msg.get("location", {})
                         content = f"[Location: {loc.get('latitude')}, {loc.get('longitude')}]"
                     elif msg_type == "reaction":
-                        rx = msg.get("reaction", {})
-                        emoji = rx.get("emoji", "")
-                        content = (emoji + " (reacted)") if emoji else "(removed reaction)"
+                        # Defensive — sometimes Meta nests reaction info under
+                        # different keys or omits it entirely on removal.
+                        rx = msg.get("reaction") or {}
+                        emoji = (rx.get("emoji") or "").strip()
+                        content = f"{emoji} (reacted)" if emoji else "(reaction removed)"
                     elif msg_type == "button":
                         btn = msg.get("button", {})
                         content = f"🔘 {btn.get('text','') or btn.get('payload','') or 'Button reply'}"
@@ -1327,11 +1329,23 @@ def webhook_receive():
                         except Exception as e:
                             app.logger.error(f"Media download failed for {media_id}: {e}")
 
+                    # Keep the raw Meta payload for anything non-text — so
+                    # we never lose the original data even if our parser
+                    # misses something. The inbox renders a fallback from
+                    # this when content is a stale placeholder.
+                    raw_payload = None
+                    if msg_type != "text":
+                        try:
+                            raw_payload = json.dumps(msg, ensure_ascii=False)
+                        except Exception:
+                            raw_payload = None
+
                     db.save_chat_message(
                         phone, name or None, "in", content,
                         wa_message_id=wa_id, message_type=msg_type,
                         media_path=media_path, mime_type=mime_type, filename=filename,
                         storage_kind=storage_kind,
+                        raw_payload=raw_payload,
                     )
 
                 # ── Status updates (sent → delivered → read) ───────────────
@@ -1366,6 +1380,18 @@ def inbox():
         # produced 6 MB HTML on busy chats. The user can rarely scroll
         # 50 messages up anyway.
         chats = [dict(m) for m in db.get_conversation(active_phone, 50)]
+        # Backfill reaction emojis from raw_payload when content is a stale
+        # placeholder like "[reaction]" (e.g. from an older code path).
+        for m in chats:
+            if (m.get("message_type") == "reaction"
+                and (not m.get("content") or m.get("content") == "[reaction]")
+                and m.get("raw_payload")):
+                try:
+                    rp = json.loads(m["raw_payload"])
+                    em = ((rp.get("reaction") or {}).get("emoji") or "").strip()
+                    m["content"] = f"{em} (reacted)" if em else "(reaction removed)"
+                except Exception:
+                    pass
         bulk  = [dict(m) for m in db.get_phone_messages(active_phone, 50)]
         bodies = {t["name"]: t.get("body", "") for t in templates}
         for b in bulk:

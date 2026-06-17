@@ -184,6 +184,8 @@ def init_db():
                 db.execute(f"ALTER TABLE chats ADD COLUMN {col} TEXT")
         if "storage_kind" not in cols:
             db.execute("ALTER TABLE chats ADD COLUMN storage_kind TEXT DEFAULT 'local'")
+        if "raw_payload" not in cols:
+            db.execute("ALTER TABLE chats ADD COLUMN raw_payload TEXT")
 
     # Seed default admin if no users exist
     with get_db() as db:
@@ -675,17 +677,18 @@ def delete_scheduled_job(job_id):
 def save_chat_message(phone, customer_name, direction, content,
                        wa_message_id=None, message_type="text", status=None,
                        media_path=None, mime_type=None, filename=None,
-                       storage_kind=None):
+                       storage_kind=None, raw_payload=None):
     with get_db() as db:
         cur = db.execute(
             """INSERT INTO chats (phone, customer_name, direction, content,
                wa_message_id, message_type, read, status,
-               media_path, mime_type, filename, storage_kind)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               media_path, mime_type, filename, storage_kind, raw_payload)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (phone, customer_name, direction, content,
              wa_message_id, message_type, 1 if direction == "out" else 0, status,
              media_path, mime_type, filename,
-             storage_kind or ("local" if media_path else None)),
+             storage_kind or ("local" if media_path else None),
+             raw_payload),
         )
         return cur.lastrowid
 
