@@ -37,7 +37,8 @@ if not MONGO_URI:
         get_batch_messages, get_failed_messages, get_phone_messages,
         get_recent_recipients,
         get_today_stats, get_month_stats, get_chart_data,
-        get_today_conversations, get_recent_sends, get_top_routes,
+        get_today_conversations, get_unique_conversations,
+        get_recent_sends, get_top_routes,
         create_scheduled_job, list_scheduled_jobs,
         get_due_jobs, update_scheduled_job, delete_scheduled_job,
         create_campaign, list_campaigns, get_campaign, update_campaign,
@@ -112,8 +113,19 @@ else:
         db.messages.create_index("customer_phone")
         db.messages.create_index("status")
         db.messages.create_index("sent_at")
+        # Compound for the dashboard "today/last-7 unique customers" count
+        db.messages.create_index([("status", ASCENDING), ("sent_at", DESCENDING)])
         db.customers.create_index([("name", ASCENDING)])
         db.batches.create_index("started_at")
+        # CHATS — previously unindexed, every inbox poll did a collection scan
+        db.chats.create_index("phone")
+        db.chats.create_index("id")
+        db.chats.create_index([("phone", ASCENDING), ("id", ASCENDING)])      # poll: phone + id > after
+        db.chats.create_index([("phone", ASCENDING), ("timestamp", ASCENDING)])  # conversation render
+        db.chats.create_index([("direction", ASCENDING), ("read", ASCENDING)])   # unread count badge
+        db.chats.create_index("wa_message_id")                                # status callback lookup
+        # Scheduled jobs scanner runs every 60s — make it cheap
+        db.scheduled_jobs.create_index([("status", ASCENDING), ("scheduled_for", ASCENDING)])
 
         if db.users.count_documents({}) == 0:
             db.users.insert_one({
@@ -460,6 +472,20 @@ else:
         return len(_db().messages.distinct(
             "customer_phone",
             {"status": "sent", "sent_at": {"$gte": today}},
+        ))
+
+    def get_unique_conversations(days=7):
+        """Count of UNIQUE customer phones we sent to in the last `days` days.
+
+        Meta upgrades the tier when this number reaches the next tier's
+        size (e.g. 1,000 unique customers in 7 days → TIER_1K) with quality
+        rating staying GREEN throughout.
+        """
+        from datetime import timedelta
+        cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
+        return len(_db().messages.distinct(
+            "customer_phone",
+            {"status": "sent", "sent_at": {"$gte": cutoff}},
         ))
 
     def get_recent_recipients(days=30, template_name=None, status="sent"):

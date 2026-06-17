@@ -514,6 +514,22 @@ def get_today_conversations():
         return row["c"] if row else 0
 
 
+def get_unique_conversations(days=7):
+    """Count of UNIQUE customer phones we sent to in the last `days` days.
+
+    Meta upgrades the tier when this reaches the next tier's size with
+    quality staying GREEN.
+    """
+    with get_db() as db:
+        row = db.execute(
+            "SELECT COUNT(DISTINCT customer_phone) AS c FROM messages "
+            "WHERE status='sent' "
+            "AND sent_at >= datetime('now', '+330 minutes', ?)",
+            (f"-{int(days)} days",),
+        ).fetchone()
+        return row["c"] if row else 0
+
+
 def get_recent_recipients(days=30, template_name=None, status="sent"):
     """One row per unique phone we've successfully sent to in the last
     `days` days, with the latest message's metadata.

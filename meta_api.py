@@ -118,6 +118,32 @@ class WhatsAppAPI:
         except Exception as e:
             return False, str(e)
 
+    # In-memory cache for the tier info — Meta's response barely changes
+    # within a day, but the dashboard hits this on every load. 5 min TTL.
+    _phone_info_cache = {"data": None, "expires_at": 0.0, "token_hash": None}
+
+    def get_phone_info_cached(self, ttl_seconds=300):
+        """Same as get_phone_info() but returns a cached value within the TTL.
+
+        The cache is keyed by a short hash of the current access token so it
+        invalidates automatically if you rotate tokens in Settings.
+        """
+        import time, hashlib
+        c = WhatsAppAPI._phone_info_cache
+        tok_hash = hashlib.md5((self.token or "").encode()).hexdigest()[:8]
+        if (c["data"] is not None
+                and c["expires_at"] > time.time()
+                and c["token_hash"] == tok_hash):
+            return c["data"]
+        fresh = self.get_phone_info()
+        if not (fresh or {}).get("error"):
+            WhatsAppAPI._phone_info_cache = {
+                "data": fresh,
+                "expires_at": time.time() + ttl_seconds,
+                "token_hash": tok_hash,
+            }
+        return fresh
+
     def get_phone_info(self):
         """Fetch tier + quality info for the configured phone number.
 
@@ -147,10 +173,14 @@ class WhatsAppAPI:
             data = r.json()
             # Map tier string → numeric daily limit for "unique business-initiated
             # conversations" (Meta's quota; service replies don't count here).
+            # Meta's current ladder (as shown in Business Manager UI):
+            #   250 → 2000 → 10K → 100K → Unlimited
+            # Older accounts may still see TIER_50 / TIER_1K from the API.
             tier_map = {
                 "TIER_50":         50,
                 "TIER_250":        250,
                 "TIER_1K":         1_000,
+                "TIER_2K":         2_000,
                 "TIER_10K":        10_000,
                 "TIER_100K":       100_000,
                 "TIER_UNLIMITED":  None,

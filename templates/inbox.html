@@ -163,15 +163,15 @@
               {% if m.media_path %}
                 {% if m.message_type in ['image', 'sticker'] %}
                   <a href="{{ url_for('serve_media', chat_id=m.id) }}" target="_blank">
-                    <img src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-img">
+                    <img src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-img" loading="lazy" decoding="async">
                   </a>
                   {% if m.content and not m.content.startswith('[') %}
                     <div class="bubble-caption">{{ m.content }}</div>
                   {% endif %}
                 {% elif m.message_type == 'audio' %}
-                  <audio controls src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-audio"></audio>
+                  <audio controls preload="none" src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-audio"></audio>
                 {% elif m.message_type == 'video' %}
-                  <video controls src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-video"></video>
+                  <video controls preload="none" src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-video"></video>
                 {% elif m.message_type == 'document' %}
                   <a href="{{ url_for('serve_media', chat_id=m.id) }}" target="_blank" class="bubble-doc">
                     📄 {{ m.filename or 'Document' }}
@@ -310,14 +310,14 @@ function appendBubble(m) {
     var src = '/media/' + m.id;
     var t = m.message_type;
     if (t === 'image' || t === 'sticker') {
-      body = '<a href="' + src + '" target="_blank"><img src="' + src + '" class="bubble-img"></a>';
+      body = '<a href="' + src + '" target="_blank"><img src="' + src + '" class="bubble-img" loading="lazy" decoding="async"></a>';
       if (m.content && m.content.charAt(0) !== '[') {
         body += '<div class="bubble-caption">' + escHtml(m.content) + '</div>';
       }
     } else if (t === 'audio') {
-      body = '<audio controls src="' + src + '" class="bubble-audio"></audio>';
+      body = '<audio controls preload="none" src="' + src + '" class="bubble-audio"></audio>';
     } else if (t === 'video') {
-      body = '<video controls src="' + src + '" class="bubble-video"></video>';
+      body = '<video controls preload="none" src="' + src + '" class="bubble-video"></video>';
     } else if (t === 'document') {
       body = '<a href="' + src + '" target="_blank" class="bubble-doc">📄 ' + escHtml(m.filename || 'Document') + '</a>';
     } else {
@@ -355,7 +355,34 @@ function pollMessages() {
 
 if (ACTIVE_PHONE) {
   checkWindow();
-  pollTimer = setInterval(pollMessages, 3000);
+  // Adaptive polling: fast when activity, slow when idle, paused when tab hidden.
+  // Saves ~70% of inbox poll traffic on busy days.
+  var POLL_FAST = 3000;     // active conversation, recent activity
+  var POLL_SLOW = 12000;    // no new messages for a while
+  var IDLE_AFTER = 60000;   // 60s without a new message → slow down
+  var lastActivity = Date.now();
+  function currentInterval() {
+    if (document.hidden) return null;                    // pause entirely
+    return (Date.now() - lastActivity < IDLE_AFTER) ? POLL_FAST : POLL_SLOW;
+  }
+  function pollOnce() {
+    if (!document.hidden) {
+      var prev = lastMsgId;
+      pollMessages();
+      // pollMessages updates lastMsgId via appendBubble; bump activity if it grew
+      if (lastMsgId > prev) lastActivity = Date.now();
+    }
+    var nxt = currentInterval();
+    pollTimer = setTimeout(pollOnce, nxt || POLL_SLOW);
+  }
+  pollTimer = setTimeout(pollOnce, POLL_FAST);
+  // Resume fast polling immediately when user comes back to the tab
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) { lastActivity = Date.now(); pollOnce(); }
+  });
+  // Any click / typing inside the chat is "activity"
+  document.getElementById('chatMessages')?.addEventListener('click',   function(){ lastActivity = Date.now(); });
+  document.getElementById('msgInput')?.addEventListener('input',       function(){ lastActivity = Date.now(); });
 }
 
 /* ── Send message ── */

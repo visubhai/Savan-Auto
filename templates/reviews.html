@@ -4,116 +4,152 @@
 
 {% block content %}
 <style>
-  .review-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; max-width:1000px; }
-  .panel       { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px; }
-  .panel h3    { font-family:'Bricolage Grotesque',sans-serif; font-size:16px; font-weight:700; color:#0f172a; margin-bottom:6px; }
-  .panel .sub  { font-size:12.5px; color:#94a3b8; margin-bottom:18px; line-height:1.5; }
-  .step        { display:flex; gap:10px; font-size:12.5px; color:#64748b; line-height:1.55; margin-bottom:6px; }
-  .step .num   { width:20px; height:20px; border-radius:50%; background:rgba(245,158,11,0.15); color:var(--amber); font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; }
-  .drop        { border:2px dashed var(--border); border-radius:10px; padding:28px 14px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; }
-  .drop:hover, .drop.drag-over { border-color:var(--amber); background:rgba(245,158,11,0.04); }
-  .small-label { font-size:11px; color:var(--muted); letter-spacing:0.05em; text-transform:uppercase; margin-bottom:6px; }
-  .row         { display:flex; gap:10px; align-items:flex-end; }
-  .row > *     { flex:1; }
-  .not-configured { background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:10px 14px; font-size:12.5px; color:var(--amber); margin-bottom:14px; }
-  .not-configured a { color:var(--amber); text-decoration:underline; }
+  .rv-wrap     { max-width:1000px; }
+  .rv-hero     { padding:24px 26px; margin-bottom:18px; }
+  .rv-hero h2  { font-family:'Bricolage Grotesque',sans-serif; font-size:22px; font-weight:800; color:var(--text); margin-bottom:6px; }
+  .rv-hero p   { font-size:13.5px; color:var(--muted); line-height:1.6; max-width:680px; }
+
+  .rv-main     { display:grid; grid-template-columns:1.6fr 1fr; gap:18px; align-items:stretch; margin-bottom:18px; }
+  .rv-panel    { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px; box-shadow:0 1px 3px rgba(15,23,42,0.04); display:flex; flex-direction:column; }
+  .rv-panel-title { font-family:'Bricolage Grotesque',sans-serif; font-size:15px; font-weight:700; color:var(--text); margin-bottom:4px; display:flex; align-items:center; gap:8px; }
+  .rv-panel-sub   { font-size:12.5px; color:var(--muted); margin-bottom:18px; line-height:1.55; }
+
+  /* Big drop zone */
+  .rv-drop     { flex:1; border:2px dashed #cbd5e1; border-radius:10px; padding:36px 18px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s; background:#fafbfc; }
+  .rv-drop:hover, .rv-drop.drag-over { border-color:var(--amber); background:var(--amber-dim); }
+  .rv-drop .icon { font-size:36px; margin-bottom:8px; }
+  .rv-drop .title { font-size:14px; font-weight:600; color:var(--text); margin-bottom:4px; }
+  .rv-drop .hint  { font-size:11.5px; color:var(--muted); }
+
+  /* Gmail panel */
+  .rv-gmail-status { font-size:12px; padding:8px 12px; border-radius:8px; margin-bottom:12px; line-height:1.5; }
+  .rv-gmail-ok     { background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; }
+  .rv-gmail-off    { background:var(--amber-dim); color:var(--amber); border:1px solid #fed7aa; }
+  .rv-gmail-off a  { color:var(--amber); text-decoration:underline; font-weight:600; }
+  .rv-gmail-meta   { font-size:11.5px; color:var(--muted); margin-top:auto; line-height:1.55; }
+
+  /* Steps */
+  .rv-steps    { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px 26px; }
+  .rv-steps h3 { font-family:'Bricolage Grotesque',sans-serif; font-size:15px; font-weight:700; margin-bottom:14px; }
+  .rv-step     { display:flex; gap:12px; align-items:flex-start; margin-bottom:10px; }
+  .rv-step:last-child { margin-bottom:0; }
+  .rv-step .num { width:22px; height:22px; border-radius:50%; background:var(--primary-dim); color:var(--primary-dark); font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; }
+  .rv-step .txt { font-size:13px; color:var(--text); line-height:1.6; }
+  .rv-step .txt .sub { color:var(--muted); font-size:12px; }
 </style>
 
-<div class="review-grid">
+<div class="rv-wrap">
 
-  <!-- ── Left: Auto-fetch from Gmail ── -->
-  <div class="panel">
-    <h3>📬 Auto-fetch from Gmail</h3>
-    <div class="sub">Pull the latest RedBus review CSV from your Gmail and compute non-reviewers in one click.</div>
+  <!-- Hero -->
+  <div class="card rv-hero">
+    <h2>📨 Send review reminders to customers who haven't reviewed</h2>
+    <p>
+      Upload an Excel or CSV containing the customers you want to follow up with
+      (typically exported from your operator portal as a "no-review" / "pending-review" list).
+      We extract phones, names, routes and platforms automatically — you pick the
+      template and send.
+    </p>
+  </div>
 
-    {% if not gmail_configured %}
-      <div class="not-configured">
-        ⚠ Gmail not configured yet. Add the address and an
-        <a href="https://myaccount.google.com/apppasswords" target="_blank">App Password</a>
-        on the <a href="{{ url_for('settings') }}">Settings page</a>.
-      </div>
-    {% else %}
-      <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">
-        Reading from <strong style="color:#1e293b;">{{ gmail_address }}</strong>
-        {% if gmail_sender_filter or gmail_subject_filter %}
-          · filter
-          {% if gmail_sender_filter %}<code style="color:var(--amber);">from:{{ gmail_sender_filter }}</code>{% endif %}
-          {% if gmail_subject_filter %}<code style="color:var(--amber);"> subject:{{ gmail_subject_filter }}</code>{% endif %}
-        {% endif %}
-      </div>
-    {% endif %}
+  <!-- Two-panel main: upload (primary) + Gmail (secondary) -->
+  <div class="rv-main">
 
-    <form method="POST" action="{{ url_for('reviews_fetch') }}" style="margin:0;">
-      <div class="row" style="margin-bottom:12px;">
-        <div>
-          <div class="small-label">Look back over the last</div>
-          <input type="number" name="lookback_days" min="1" max="365" value="{{ default_lookback }}" class="input" style="width:100%;">
+    <!-- Primary: drag & drop upload -->
+    <div class="rv-panel">
+      <div class="rv-panel-title">📁 Upload file</div>
+      <div class="rv-panel-sub">CSV, TSV or Excel (.xlsx). Phone column is required; name / route / platform are picked up automatically when present.</div>
+
+      <form method="POST" action="{{ url_for('reviews_upload') }}" enctype="multipart/form-data" id="reviewUploadForm" style="flex:1;display:flex;flex-direction:column;">
+        <label for="reviewFile" class="rv-drop" id="reviewDrop">
+          <div class="icon">⬆</div>
+          <div class="title">Click to choose file <span style="color:var(--muted);font-weight:500;">or drag &amp; drop</span></div>
+          <div class="hint">CSV · TSV · Excel (.xlsx)</div>
+          <input id="reviewFile" type="file" name="review_file" style="display:none;"
+                 onchange="document.getElementById('reviewUploadForm').submit()">
+        </label>
+      </form>
+    </div>
+
+    <!-- Secondary: Gmail auto-fetch -->
+    <div class="rv-panel">
+      <div class="rv-panel-title">📬 Or auto-fetch from Gmail</div>
+      <div class="rv-panel-sub">Pulls the most recent matching email's attachment and processes it like a manual upload.</div>
+
+      {% if not gmail_configured %}
+        <div class="rv-gmail-status rv-gmail-off">
+          Gmail not configured — add an
+          <a href="https://myaccount.google.com/apppasswords" target="_blank">App Password</a>
+          on the <a href="{{ url_for('settings') }}">Settings page</a> first.
         </div>
-        <div>
-          <div class="small-label">&nbsp;</div>
-          <div style="height:38px;display:flex;align-items:center;color:#777;font-size:13px;">days of sent messages</div>
+      {% else %}
+        <div class="rv-gmail-status rv-gmail-ok">
+          ✓ Reading from <strong>{{ gmail_address }}</strong>
+          {% if gmail_sender_filter %}<br>From&nbsp;<code style="color:var(--primary-dark);">{{ gmail_sender_filter }}</code>{% endif %}
+          {% if gmail_subject_filter %}<br>Subject contains&nbsp;<code style="color:var(--primary-dark);">{{ gmail_subject_filter }}</code>{% endif %}
         </div>
-      </div>
-      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;"
-              {% if not gmail_configured %}disabled style="opacity:0.5;cursor:not-allowed;"{% endif %}>
-        📥 Fetch latest from Gmail
-      </button>
-    </form>
+      {% endif %}
 
-    <div style="font-size:11.5px;color:#94a3b8;margin-top:14px;line-height:1.6;">
-      Each fetch marks the email as read and remembers its UID so the next
-      fetch only picks up newer ones. You won't get the same review file twice.
+      <form method="POST" action="{{ url_for('reviews_fetch') }}" style="margin:0;">
+        <label class="input-label" style="font-size:11px;">Look back over the last (days)</label>
+        <input type="number" name="lookback_days" min="1" max="365" value="{{ default_lookback }}" class="input" style="margin-bottom:12px;">
+        <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;"
+                {% if not gmail_configured %}disabled{% endif %}>
+          📥 Fetch latest from Gmail
+        </button>
+      </form>
+
+      <div class="rv-gmail-meta">
+        Each fetch marks the email as read and remembers its UID — you won't get the same file twice.
+      </div>
     </div>
   </div>
 
-  <!-- ── Right: Manual upload ── -->
-  <div class="panel">
-    <h3>📁 Or upload manually</h3>
-    <div class="sub">Drop the RedPro RnR CSV here. Same matching logic — works even if you skip Gmail setup.</div>
-
-    <form method="POST" action="{{ url_for('reviews_upload') }}" enctype="multipart/form-data" id="reviewUploadForm">
-      <label for="reviewFile" class="drop" id="reviewDrop">
-        <div style="font-size:32px;margin-bottom:6px;">⬆</div>
-        <div style="font-size:13px;color:#64748b;"><strong style="color:#1e293b;">Click to choose file</strong> or drag & drop</div>
-        <div style="font-size:11px;color:#94a3b8;margin-top:4px;">CSV / Excel from RedPro RnR export</div>
-        <input id="reviewFile" type="file" name="review_file" style="display:none;" onchange="document.getElementById('reviewUploadForm').submit()">
-      </label>
-      <div class="row" style="margin-top:14px;">
-        <div>
-          <div class="small-label">Look back</div>
-          <input type="number" name="lookback_days" min="1" max="365" value="{{ default_lookback }}" class="input">
-        </div>
-        <div>
-          <div class="small-label">&nbsp;</div>
-          <div style="height:38px;display:flex;align-items:center;color:#777;font-size:13px;">days</div>
-        </div>
+  <!-- Steps -->
+  <div class="rv-steps">
+    <h3>How it works</h3>
+    <div class="rv-step">
+      <div class="num">1</div>
+      <div class="txt">
+        Upload your "pending-review customers" Excel/CSV (or fetch it from Gmail).
+        <div class="sub">The app reads any column layout — RedBus, AbhiBus, Paytm, MakeMyTrip, generic.</div>
       </div>
-    </form>
+    </div>
+    <div class="rv-step">
+      <div class="num">2</div>
+      <div class="txt">
+        We extract phones, names, routes and platforms. Opted-out customers and duplicates are filtered automatically.
+      </div>
+    </div>
+    <div class="rv-step">
+      <div class="num">3</div>
+      <div class="txt">
+        On the next page (Send Preview), you can uncheck rows, see the cost estimate, and edit anything inline.
+      </div>
+    </div>
+    <div class="rv-step">
+      <div class="num">4</div>
+      <div class="txt">
+        Pick your <code style="color:var(--amber);">review_followup</code> template (auto-selected if it exists) and click <strong>Send</strong> — or <strong>Schedule</strong> for later.
+      </div>
+    </div>
   </div>
-
-</div>
-
-<!-- ── How it works ── -->
-<div class="panel" style="max-width:1000px;margin-top:16px;">
-  <h3>How this works</h3>
-  <div class="step"><div class="num">1</div><div>You (or Gmail) feeds us a RedPro RnR CSV. It only contains passengers who <strong>did</strong> review.</div></div>
-  <div class="step"><div class="num">2</div><div>We pull every phone number you sent a template message to in the last N days from your batch history.</div></div>
-  <div class="step"><div class="num">3</div><div>Subtract the reviewers → the rest are non-reviewers. They land on the Send Preview page editable, ready to send a follow-up template.</div></div>
-  <div class="step"><div class="num">4</div><div>Pick your <code style="color:var(--amber);">review_followup</code> template and send / schedule like any other batch.</div></div>
 </div>
 
 <script>
   // Drag & drop highlight on the manual upload
-  var dz = document.getElementById('reviewDrop');
-  var input = document.getElementById('reviewFile');
-  dz.addEventListener('dragover',  function(e){ e.preventDefault(); dz.classList.add('drag-over'); });
-  dz.addEventListener('dragleave', function(){  dz.classList.remove('drag-over'); });
-  dz.addEventListener('drop',      function(e){
-    e.preventDefault(); dz.classList.remove('drag-over');
-    if (e.dataTransfer.files.length) {
-      input.files = e.dataTransfer.files;
-      document.getElementById('reviewUploadForm').submit();
-    }
-  });
+  (function() {
+    var dz = document.getElementById('reviewDrop');
+    var input = document.getElementById('reviewFile');
+    if (!dz || !input) return;
+    dz.addEventListener('dragover',  function(e){ e.preventDefault(); dz.classList.add('drag-over'); });
+    dz.addEventListener('dragleave', function(){  dz.classList.remove('drag-over'); });
+    dz.addEventListener('drop',      function(e){
+      e.preventDefault(); dz.classList.remove('drag-over');
+      if (e.dataTransfer.files.length) {
+        input.files = e.dataTransfer.files;
+        document.getElementById('reviewUploadForm').submit();
+      }
+    });
+  })();
 </script>
 {% endblock %}

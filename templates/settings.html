@@ -119,6 +119,28 @@
     <input type="text" name="business_name" value="{{ settings.business_name }}" class="input" style="max-width:320px;">
   </div>
 
+  <!-- WhatsApp Tier Override -->
+  <div class="card" style="padding:24px;margin-bottom:16px;">
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:6px;">
+      📱 WhatsApp Tier Override
+    </div>
+    <div style="font-size:12.5px;color:var(--muted);line-height:1.6;margin-bottom:14px;">
+      Meta's Graph API field <code style="color:var(--text);">messaging_limit_tier</code> sometimes
+      lags behind the actual tier shown in
+      <a href="https://business.facebook.com/latest/whatsapp_manager/messaging_limits" target="_blank" style="color:var(--primary);">Business Manager → Messaging limits</a>.
+      Enter your <strong>current actual</strong> limit (e.g. 2000) here to override the API value on the Dashboard.
+      Leave blank to use whatever Meta's API reports.
+    </div>
+    <label class="input-label">Current 24-hour business-initiated limit</label>
+    <input type="text" name="whatsapp_tier_limit_override"
+           value="{{ settings.whatsapp_tier_limit_override or '' }}"
+           class="input" style="max-width:220px;"
+           placeholder="e.g. 2000 (or 'unlimited')">
+    <div style="font-size:11.5px;color:var(--muted-soft);margin-top:6px;">
+      Accepted values: <code>50</code>, <code>250</code>, <code>2000</code>, <code>10000</code>, <code>100000</code>, or <code>unlimited</code>.
+    </div>
+  </div>
+
   <!-- Gmail Auto-Fetch (Review Follow-up) -->
   <div class="card" style="padding:24px;margin-bottom:16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">

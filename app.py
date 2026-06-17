@@ -425,8 +425,20 @@ def send_preview():
         return redirect(url_for("send"))
 
     templates = [dict(t) for t in db.get_templates()]
-    default_tpl = db.get_default_template()
-    default_tpl = dict(default_tpl) if default_tpl else None
+    # If the pending batch hinted at a specific template (e.g. Review
+    # Follow-up wants "review_followup"), pre-select that one. Otherwise
+    # fall back to the DB-wide default template.
+    default_tpl = None
+    hinted_name = pending.get("default_template")
+    if hinted_name:
+        default_tpl = next(
+            (t for t in templates if t.get("name") == hinted_name),
+            None,
+        )
+    if not default_tpl:
+        row = db.get_default_template()
+        default_tpl = dict(row) if row else None
+
     cost_per = float(db.get_setting("cost_per_message", "0.12"))
     estimated_cost = round(len(pending["passengers"]) * cost_per, 2)
     delay = float(db.get_setting("delay_between_messages", "1.5"))
@@ -752,6 +764,8 @@ def settings():
             "access_token", "phone_number_id", "waba_id", "api_version",
             "delay_between_messages", "max_retries", "cost_per_message",
             "wapsolution_monthly_cost", "business_name",
+            # WhatsApp tier override (Meta API field sometimes lags the UI)
+            "whatsapp_tier_limit_override",
             # Gmail auto-fetch (Review Follow-up)
             "gmail_address", "gmail_app_password",
             "gmail_sender_filter", "gmail_subject_filter",
@@ -986,81 +1000,85 @@ def reviews():
     )
 
 
-def _handle_review_csv(content, source_label):
-    """Shared logic for both manual upload and Gmail-fetched CSVs."""
-    parsed = parse_review_export(content, source_label)
-    days = _safe_int(request.form.get("lookback_days", db.get_setting("review_lookback_days", "14")),
-                     default=14, minimum=1)
-    db.set_setting("review_lookback_days", str(days))
+def _read_tabular_file(filename, content):
+    """Return CSV-formatted bytes for either a CSV or Excel file."""
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext in (".xlsx", ".xls"):
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb.active
+        out = io.StringIO()
+        w = csv.writer(out)
+        for row in ws.iter_rows(values_only=True):
+            w.writerow([str(c) if c is not None else "" for c in row])
+        return out.getvalue().encode("utf-8")
+    return content
 
-    recent     = db.get_recent_recipients(days=days, status="sent")
-    reviewers  = parsed["reviewers"]
-    non_review = [r for r in recent if r.get("phone") and r["phone"] not in reviewers]
 
-    if not non_review:
+def _start_followup_batch(parsed, source_label):
+    """Common: stash the parsed customers as pending → go to Send Preview."""
+    passengers = parsed.get("passengers") or []
+    total_rows = parsed.get("total_rows_seen", len(passengers))
+
+    if not passengers:
         flash(
-            f"✓ {len(reviewers)} reviewers found from '{source_label}'. "
-            f"Everyone we sent to in the last {days} days has already reviewed — nothing to follow up on.",
-            "info",
+            f"No valid phone numbers found in '{source_label}'. "
+            f"Check the file has a phone/mobile column.",
+            "error",
         )
         return redirect(url_for("reviews"))
 
+    # Respect opt-outs (same as the main Send flow)
+    opted_out_phones = {r["phone"] for r in db.search_customers(opted_out=True, limit=50000)}
+    before = len(passengers)
+    passengers = [p for p in passengers if p["phone"] not in opted_out_phones]
+    opt_out_filtered = before - len(passengers)
+
     pending = {
-        "passengers": [
-            {
-                "phone":         r["phone"],
-                "name":          r.get("name") or "Customer",
-                "route":         r.get("route") or "",
-                "platform":      r.get("platform") or "",
-                "sent_at":       r.get("sent_at") or "",
-                "template_name": r.get("template_name") or "",
-            }
-            for r in non_review
-        ],
+        "passengers": passengers,
         "stats": {
-            "total_rows": parsed["total_rows"],
-            "reviewers":  len(reviewers),
-            "cancelled":  parsed.get("skipped_no_phone", 0),
-            "duplicates": 0,
-            "invalid":    parsed.get("skipped_invalid_phone", 0),
-            "opted_out":  0,
-            "ready":      len(non_review),
+            "total_rows": total_rows,
+            "cancelled":  parsed.get("cancelled_count", 0),
+            "duplicates": parsed.get("duplicates_removed", 0),
+            "invalid":    parsed.get("invalid_phones", 0),
+            "opted_out":  opt_out_filtered,
+            "ready":      len(passengers),
         },
-        "filename": f"Follow-up · {source_label} · {len(non_review)} non-reviewers (last {days}d)",
-        "review_source": source_label,
-        "lookback_days": days,
+        "filename": f"Review follow-up · {source_label}",
+        "default_template": "review_followup",   # send_preview can pre-select
     }
     key = save_pending(pending)
     session["pending_key"] = key
     flash(
-        f"✓ {len(reviewers)} reviewed · {len(non_review)} did not. "
-        f"Refine your targets below, then send.",
+        f"✓ Loaded {len(passengers)} customers from '{source_label}'. "
+        f"Pick your follow-up template below and send / schedule.",
         "success",
     )
-    return redirect(url_for("reviews_refine"))
+    return redirect(url_for("send_preview"))
 
 
 @app.route("/reviews/upload", methods=["POST"])
 @login_required
 def reviews_upload():
-    files = request.files.getlist("review_file")
-    files = [f for f in files if f.filename]
+    files = [f for f in request.files.getlist("review_file") if f.filename]
     if not files:
-        flash("Please pick a CSV file to upload", "error")
+        flash("Please pick a CSV or Excel file", "error")
         return redirect(url_for("reviews"))
     f = files[0]
     try:
-        content = f.read()
+        raw = f.read()
+        content = _read_tabular_file(f.filename, raw)
+        parsed = auto_parse(content, filename=f.filename)
     except Exception as e:
-        flash(f"Failed to read file: {e}", "error")
+        flash(f"Failed to parse '{f.filename}': {e}", "error")
         return redirect(url_for("reviews"))
-    return _handle_review_csv(content, f.filename)
+    return _start_followup_batch(parsed, f.filename)
 
 
 @app.route("/reviews/fetch", methods=["POST"])
 @login_required
 def reviews_fetch():
-    """Pull the next unread matching email from Gmail and process its attachment."""
+    """Pull the next unread matching email from Gmail and start the follow-up batch."""
     if not gmail_fetch.is_configured():
         flash("Gmail not configured. Add address and App Password in Settings.", "error")
         return redirect(url_for("reviews"))
@@ -1078,19 +1096,25 @@ def reviews_fetch():
         flash("No new matching emails with attachments in Gmail.", "info")
         return redirect(url_for("reviews"))
 
-    # Process the latest matching email's first CSV/XLSX attachment
+    # Take the most recent matching email's first CSV/XLSX attachment
     latest = emails[-1]
-    attach = None
-    for a in latest["attachments"]:
-        name = (a.get("filename") or "").lower()
-        if name.endswith((".csv", ".xlsx", ".xls", ".txt")):
-            attach = a
-            break
+    attach = next(
+        (a for a in latest["attachments"]
+         if (a.get("filename") or "").lower().endswith((".csv", ".xlsx", ".xls", ".txt"))),
+        None,
+    )
     if not attach:
-        flash(f"Email '{latest.get('subject','')}' had attachments but none were CSV/Excel.", "error")
+        flash(f"Email '{latest.get('subject','')}' had no CSV/Excel attachment.", "error")
         return redirect(url_for("reviews"))
 
-    return _handle_review_csv(attach["content_bytes"], attach["filename"])
+    try:
+        content = _read_tabular_file(attach["filename"], attach["content_bytes"])
+        parsed = auto_parse(content, filename=attach["filename"])
+    except Exception as e:
+        flash(f"Failed to parse '{attach['filename']}': {e}", "error")
+        return redirect(url_for("reviews"))
+
+    return _start_followup_batch(parsed, attach["filename"])
 
 
 @app.route("/reviews/refine")
@@ -1488,37 +1512,119 @@ def inbox_unread():
     return jsonify({"count": db.get_unread_count()})
 
 
+# Meta's current actual tier ladder (visible in Business Manager UI).
+# Older API responses may still report the legacy TIER_1K, so we map that
+# to the closest current rung (2000) when picking the next rung.
+_TIER_LADDER = [50, 250, 2_000, 10_000, 100_000]   # ascending
+
+
+def _next_tier_size(current_limit):
+    """Return the size of the next tier above `current_limit`, or None if at top."""
+    if current_limit is None:
+        return None
+    for size in _TIER_LADDER:
+        if size > current_limit:
+            return size
+    return None  # already past 100K → next is UNLIMITED (no numeric target)
+
+
+def _label_for_size(size):
+    """1000 -> '1K' ; 10000 -> '10K' ; 100000 -> '100K' ; None -> 'UNLIMITED'."""
+    if size is None:
+        return "UNLIMITED"
+    if size >= 1_000_000:
+        return f"{size // 1_000_000}M"
+    if size >= 1_000:
+        return f"{size // 1_000}K"
+    return str(size)
+
+
 @app.route("/api/dashboard/wa-limit")
 @login_required
 def dashboard_wa_limit():
     """Live tier + usage info for the WhatsApp limit card on the dashboard."""
     api = WhatsAppAPI()
-    info = api.get_phone_info() or {}
+    # ?fresh=1 from the Refresh button → skip cache. Normal page loads
+    # use the 5-minute cache so the dashboard isn't gated on Meta's API.
+    if request.args.get("fresh") == "1":
+        info = api.get_phone_info() or {}
+    else:
+        info = api.get_phone_info_cached() or {}
     if info.get("error"):
         return jsonify({"ok": False, "error": info["error"]})
 
     used  = db.get_today_conversations()
-    limit = info.get("tier_limit")  # None when unlimited
-    tier  = info.get("messaging_limit_tier") or "UNKNOWN"
+
+    # The Meta Graph API's `messaging_limit_tier` field sometimes lags
+    # behind the actual tier shown in Business Manager. Let the user pin
+    # the real limit in Settings as a manual override. We pick the HIGHER
+    # of (API value, override) so the dashboard auto-updates when Meta
+    # actually upgrades the account, without the user touching settings.
+    override_raw = (db.get_setting("whatsapp_tier_limit_override", "") or "").strip()
+    override = None
+    if override_raw:
+        if override_raw.lower() in ("unlimited", "∞", "inf"):
+            override = "unlimited"
+        else:
+            try:
+                override = int(override_raw)
+            except ValueError:
+                override = None
+
+    api_tier      = info.get("messaging_limit_tier") or ""
+    api_limit     = info.get("tier_limit")          # int, or None when unlimited
+    api_unlimited = (api_tier == "TIER_UNLIMITED")
+
+    # "Unlimited" beats every numeric value
+    if api_unlimited or override == "unlimited":
+        limit          = None
+        tier_label_str = "UNLIMITED"
+        tier_source    = "api" if api_unlimited else "manual"
+    else:
+        manual_val = override if isinstance(override, int) and override > 0 else 0
+        api_val    = api_limit or 0
+        if manual_val > api_val:
+            limit, tier_source = manual_val, "manual"
+        elif api_val > 0:
+            limit, tier_source = api_val, "api"
+        else:
+            limit, tier_source = None, "unknown"
+        tier_label_str = _label_for_size(limit) if limit else "—"
 
     if limit:
         remaining = max(0, limit - used)
-        pct = min(100, round(used * 100 / limit)) if limit else 0
+        pct = min(100, round(used * 100 / limit))
     else:
         remaining = None
         pct = 0
 
+    # Upgrade-progress: 7-day unique customers vs next-rung target
+    next_target = _next_tier_size(limit) if limit else None
+    last7 = db.get_unique_conversations(days=7)
+    next_remaining = None
+    next_pct = 0
+    if next_target:
+        next_remaining = max(0, next_target - last7)
+        next_pct = min(100, round(last7 * 100 / next_target))
+
     return jsonify({
-        "ok":            True,
-        "tier":          tier,
-        "tier_label":    tier.replace("TIER_", "").replace("_", " "),
-        "limit":         limit,
-        "used":          used,
-        "remaining":     remaining,
-        "percent":       pct,
-        "quality":       info.get("quality_rating", "—"),
-        "display_phone": info.get("display_phone_number", ""),
-        "verified_name": info.get("verified_name", ""),
+        "ok":                True,
+        "tier":              info.get("messaging_limit_tier") or "—",
+        "tier_label":        tier_label_str,
+        "tier_source":       tier_source,           # "api" or "manual"
+        "limit":             limit,
+        "used":              used,
+        "remaining":         remaining,
+        "percent":           pct,
+        "quality":           info.get("quality_rating", "—"),
+        "display_phone":     info.get("display_phone_number", ""),
+        "verified_name":     info.get("verified_name", ""),
+        # Upgrade path
+        "next_tier_target":  next_target,
+        "next_tier_label":   _label_for_size(next_target) if next_target else "UNLIMITED",
+        "last7_unique":      last7,
+        "next_tier_needed":  next_remaining,
+        "next_tier_percent": next_pct,
     })
 
 
