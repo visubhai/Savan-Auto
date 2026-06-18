@@ -45,11 +45,16 @@ def clean_platform(raw):
     # "Online", "Travel" are stripped — e.g. "Abhibus Dir" → "AbhiBus".
     # Order matters: check longer/more specific names first.
     known = [
+        # Order matters: longer/more-specific names first so we don't
+        # accidentally match "ibibo" inside "goibibo" (we want Goibibo).
         ("makemytrip", "MakeMyTrip"), ("easemytrip", "EaseMyTrip"),
         ("railyatri", "RailYatri"), ("redbus", "RedBus"),
         ("abhibus", "AbhiBus"), ("goibibo", "Goibibo"),
         ("paytm", "Paytm"), ("yatra", "Yatra"),
         ("ixigo", "Ixigo"), ("mmt", "MakeMyTrip"),
+        # RedPro RnR/NR exports use OrgUnit values like REDBUS_IN /
+        # MMT_IN / IBIBO_IN — map ibibo to Goibibo (Ibibo Group's brand).
+        ("ibibo", "Goibibo"),
     ]
     for kw, name in known:
         if kw in lower:
@@ -95,7 +100,11 @@ def _detect_role(key):
     Given a column header, return its role:
     phone / name / from / to / route / platform / status / booking_id / skip
     """
-    k = key.lower().strip()
+    # Split camelCase / PascalCase first so "ContactNumber" → "contact number"
+    # and "OrgUnit" → "org unit", letting the keyword regexes match them.
+    k = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key.strip())
+    k = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", k)
+    k = k.lower()
     k = re.sub(r"[^a-z0-9 ]", " ", k)
     k = re.sub(r"\s+", " ", k).strip()
 
@@ -146,7 +155,8 @@ def _detect_role(key):
     # Platform / booking source
     if k in ("booked by", "booking source", "platform", "channel", "agent",
              "operator", "source", "booking channel", "booked from",
-             "booked via", "book via", "booking platform"):
+             "booked via", "book via", "booking platform",
+             "org unit", "orgunit", "org"):
         if "city" not in k and "station" not in k:
             return "platform"
 
