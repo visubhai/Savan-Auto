@@ -73,18 +73,32 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
                 params.append("—")
         else:
             ov = var_overrides or {}
+            # Follow-up templates need PLATFORM in {{1}} (e.g. "Aapne RedBus
+            # pe review nahi diya..."), while reminder templates need
+            # passenger NAME in {{1}}. Detect by template name and pick the
+            # right auto-source list per variable position.
+            is_followup = bool(template_name and "follow" in template_name.lower())
+            if is_followup:
+                auto_sources = [
+                    lambda p: p.get("platform") or "the platform",
+                    lambda p: p.get("name") or "Customer",
+                    lambda p: p.get("route") or "your journey",
+                ]
+            else:
+                auto_sources = [
+                    lambda p: p.get("name") or "Customer",
+                    lambda p: p.get("route") or "your journey",
+                    lambda p: p.get("platform") or "the platform",
+                ]
+
             params = []
             for i in range(1, var_count + 1):
                 fixed = ov.get(str(i)) or ov.get(i)
                 if fixed:
                     # User-supplied fixed value for the whole batch
                     params.append(str(fixed))
-                elif i == 1:
-                    params.append(p.get("name") or "Customer")
-                elif i == 2:
-                    params.append(p.get("route") or "your journey")
-                elif i == 3:
-                    params.append(p.get("platform") or "the platform")
+                elif i <= len(auto_sources):
+                    params.append(auto_sources[i - 1](p))
                 else:
                     # No auto source and no fixed value provided
                     params.append("—")

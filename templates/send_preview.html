@@ -190,16 +190,26 @@ const tplVarCount = {};
 {% endfor %}
 
 // Variables 1-3 auto-map to passenger data; 4+ need a fixed value
-const AUTO_LABELS = { 1: 'Passenger Name', 2: 'Route', 3: 'Platform' };
+// Mapping mirrors scheduler.send_batch — follow-up templates put platform
+// in {{1}} ("Aapne RedBus pe …"), other templates put name in {{1}}.
+const AUTO_LABELS_DEFAULT  = { 1: 'Passenger Name', 2: 'Route', 3: 'Platform' };
+const AUTO_LABELS_FOLLOWUP = { 1: 'Platform',       2: 'Passenger Name', 3: 'Route' };
+
+function _autoLabels(tplName) {
+  return (tplName && tplName.toLowerCase().indexOf('follow') !== -1)
+    ? AUTO_LABELS_FOLLOWUP
+    : AUTO_LABELS_DEFAULT;
+}
 
 function renderVarInputs(tplName) {
   const section = document.getElementById('varOverrideSection');
   const wrap = document.getElementById('varOverrideFields');
   const n = tplVarCount[tplName] || 0;
   if (!n) { section.style.display = 'none'; wrap.innerHTML = ''; return; }
+  const LABELS = _autoLabels(tplName);
   let html = '';
   for (let i = 1; i <= n; i++) {
-    const auto = AUTO_LABELS[i];
+    const auto = LABELS[i];
     if (auto) {
       html += '<div style="margin-bottom:8px;">' +
         '<label class="input-label" style="font-size:10px;">Variable ' + i + ' — ' + auto + '</label>' +

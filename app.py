@@ -96,23 +96,35 @@ _MIME_EXT = {
 }
 
 
-def render_template_body(body, name=None, route=None, platform=None, extra=None):
+def render_template_body(body, name=None, route=None, platform=None, extra=None, template_name=None):
     """Substitute {{1}}, {{2}}, {{3}}, … in a WhatsApp template body.
 
-    Variables 1-3 map to the per-passenger fields (name / route / platform),
-    matching the scheduler's send-time mapping. `extra` is a dict of
-    {position_str: value} for any higher-indexed variables (e.g. fixed
-    campaign values) — used opportunistically; unknown placeholders are
-    left as-is so it's obvious the data wasn't logged.
+    Mapping varies by template type — must mirror scheduler.send_batch:
+      • Follow-up templates (name contains "follow"): {{1}}=platform,
+        {{2}}=name, {{3}}=route
+      • All other templates:                          {{1}}=name,
+        {{2}}=route, {{3}}=platform
+
+    `extra` is a dict of {position_str: value} for any higher-indexed
+    variables (e.g. fixed campaign values) — used opportunistically;
+    unknown placeholders are left as-is.
     """
     if not body:
         return ""
     import re
-    subs = {
-        "1": (name or "Customer"),
-        "2": (route or "your journey"),
-        "3": (platform or "the platform"),
-    }
+    is_followup = bool(template_name and "follow" in template_name.lower())
+    if is_followup:
+        subs = {
+            "1": (platform or "the platform"),
+            "2": (name or "Customer"),
+            "3": (route or "your journey"),
+        }
+    else:
+        subs = {
+            "1": (name or "Customer"),
+            "2": (route or "your journey"),
+            "3": (platform or "the platform"),
+        }
     if extra:
         for k, v in extra.items():
             if v:
@@ -1401,6 +1413,7 @@ def inbox():
                 name=b.get("customer_name"),
                 route=b.get("route"),
                 platform=b.get("platform"),
+                template_name=tname,
             )
             content = rendered or f"📋 Sent template: {tname}"
             messages.append({
