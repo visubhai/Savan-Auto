@@ -185,7 +185,7 @@
               <span class="bubble-time">
                 {{ m.timestamp[11:16] if m.timestamp else '' }}
                 {% if m.direction == 'out' %}
-                  &nbsp;{% if m.status == 'read' %}✓✓{% elif m.status == 'delivered' %}✓✓{% elif m.status == 'sent' %}✓{% else %}⏳{% endif %}
+                  &nbsp;{% if m.status == 'read' %}✓✓{% elif m.status == 'delivered' %}✓✓{% elif m.status == 'sent' %}✓{% elif m.status == 'failed' %}<span style="color:#dc2626;">✗</span>{% else %}⏳{% endif %}
                 {% endif %}
               </span>
             </div>
@@ -303,7 +303,11 @@ function appendBubble(m) {
   var time = m.timestamp ? m.timestamp.substr(11, 5) : '';
   var statusIcon = '';
   if (m.direction === 'out') {
-    statusIcon = m.status === 'read' ? ' ✓✓' : m.status === 'delivered' ? ' ✓✓' : m.status === 'sent' ? ' ✓' : ' ⏳';
+    statusIcon = m.status === 'read'      ? ' ✓✓'
+              : m.status === 'delivered' ? ' ✓✓'
+              : m.status === 'sent'      ? ' ✓'
+              : m.status === 'failed'    ? ' ✗'
+              :                            ' ⏳';
   }
   var body;
   if (m.media_path) {

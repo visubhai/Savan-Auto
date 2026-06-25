@@ -29,7 +29,7 @@ if not MONGO_URI:
         get_setting, set_setting, get_all_settings,
         get_user_by_username, get_user_by_id, create_user, list_users,
         get_templates, get_default_template, get_template_by_name,
-        upsert_template, set_default_template,
+        upsert_template, update_template_meta, set_default_template,
         upsert_customer, search_customers, count_customers, toggle_opt_out,
         create_batch, update_batch_counts, complete_batch,
         get_batch, list_batches,
@@ -43,6 +43,7 @@ if not MONGO_URI:
         get_due_jobs, update_scheduled_job, delete_scheduled_job,
         create_campaign, list_campaigns, get_campaign, update_campaign,
         update_campaign_last_used, delete_campaign,
+        update_campaign_image, clear_campaign_image,
         save_chat_message, get_conversation, list_conversations, mark_read,
         get_unread_count, update_chat_status, get_new_messages,
         change_user_password, delete_user,
@@ -253,6 +254,26 @@ else:
     def delete_campaign(campaign_id):
         _db().campaigns.delete_one({"id": int(campaign_id)})
 
+    def update_campaign_image(campaign_id, media_id, mime_type, size_bytes):
+        """Attach a per-campaign banner image (Meta media_id) that overrides
+        the template's default header image at send time."""
+        _db().campaigns.update_one({"id": int(campaign_id)}, {"$set": {
+            "header_media_id":          media_id,
+            "header_image_mime":        mime_type,
+            "header_image_size":        int(size_bytes),
+            "header_image_uploaded_at": _now(),
+        }})
+
+    def clear_campaign_image(campaign_id):
+        """Remove the per-campaign image override; campaign reverts to using
+        the template's default header image."""
+        _db().campaigns.update_one({"id": int(campaign_id)}, {"$set": {
+            "header_media_id":          None,
+            "header_image_mime":        None,
+            "header_image_size":        None,
+            "header_image_uploaded_at": None,
+        }})
+
     # ── Templates ─────────────────────────────────────────────────────────────
 
     def get_templates():
@@ -267,7 +288,8 @@ else:
         return _clean(_db().templates.find_one({"name": name}))
 
     def upsert_template(name, language, category, body, variable_count, status,
-                         header_type=None, header_example=None, buttons=None):
+                         header_type=None, header_example=None, header_media_id=None,
+                         buttons=None):
         _db().templates.update_one(
             {"name": name},
             {"$set": {
@@ -278,9 +300,10 @@ else:
                 "status": status,
                 # Header metadata — needed so send_template can include the
                 # right header component for IMAGE/VIDEO/DOCUMENT templates.
-                "header_type":    header_type,
-                "header_example": header_example,
-                "buttons":        buttons,
+                "header_type":     header_type,
+                "header_example":  header_example,
+                "header_media_id": header_media_id,
+                "buttons":         buttons,
                 "synced_at": _now(),
             },
              "$setOnInsert": {
@@ -290,6 +313,18 @@ else:
             }},
             upsert=True,
         )
+
+    def update_template_meta(name, **fields):
+        """Update arbitrary fields on a template document.
+
+        Used for per-template flags like header_image_is_custom that don't
+        warrant their own upsert_template parameter. Empty/missing fields
+        are ignored.
+        """
+        clean = {k: v for k, v in fields.items() if v is not None}
+        if not clean:
+            return
+        _db().templates.update_one({"name": name}, {"$set": clean})
 
     def set_default_template(name):
         _db().templates.update_many({}, {"$set": {"is_default": 0}})

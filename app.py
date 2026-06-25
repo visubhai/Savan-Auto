@@ -751,6 +751,71 @@ def templates_set_default(name):
     return redirect(url_for("templates_page"))
 
 
+@app.route("/templates/<name>/upload-image", methods=["POST"])
+@login_required
+def templates_upload_image(name):
+    """Upload a custom header image for an image-header template.
+
+    The template structure stays approved — Meta only locks the header
+    FORMAT (=IMAGE), the actual media is provided at send time. So we
+    can swap the image any time without re-submitting the template.
+
+    Flow:
+      1. Read uploaded file, validate size/MIME
+      2. Upload to Meta Media API → fresh media_id (lasts ~30 days)
+      3. Store the media_id on the template (header_media_id)
+      4. Mark the source as custom so the UI shows it differently
+    """
+    tpl = db.get_template_by_name(name)
+    if not tpl:
+        return jsonify({"ok": False, "error": "template not found"}), 404
+    tpl = dict(tpl)
+    if (tpl.get("header_type") or "").upper() != "IMAGE":
+        return jsonify({"ok": False, "error": "template has no image header"}), 400
+
+    files = [f for f in request.files.getlist("image") if f.filename]
+    if not files:
+        return jsonify({"ok": False, "error": "no file provided"}), 400
+    f = files[0]
+    content = f.read()
+    if not content:
+        return jsonify({"ok": False, "error": "empty file"}), 400
+    # Meta accepts images up to 5 MB
+    if len(content) > 5 * 1024 * 1024:
+        return jsonify({"ok": False, "error": "image too large (max 5 MB)"}), 400
+    mime = (f.mimetype or "").lower() or "image/jpeg"
+    if not mime.startswith("image/"):
+        return jsonify({"ok": False, "error": "file must be an image"}), 400
+
+    api = WhatsAppAPI()
+    if not api.is_configured():
+        return jsonify({"ok": False, "error": "WhatsApp API not configured"}), 400
+
+    media_id = api.upload_media(content, mime, filename=name)
+    if not media_id:
+        return jsonify({"ok": False, "error": "Meta refused the upload (check size/format)"}), 502
+
+    # Persist new media_id + mark as custom
+    db.upsert_template(
+        tpl["name"], tpl["language"], tpl["category"], tpl.get("body", ""),
+        tpl.get("variable_count", 0), tpl.get("status", "approved"),
+        header_type=tpl.get("header_type"),
+        header_example=tpl.get("header_example"),
+        header_media_id=media_id,
+        buttons=tpl.get("buttons"),
+    )
+    # Track this as a manual upload so sync doesn't overwrite it later
+    db.update_template_meta(
+        tpl["name"],
+        header_image_is_custom=True,
+        header_image_size=len(content),
+        header_image_mime=mime,
+        header_image_uploaded_at=db.now_ist().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+
+    return jsonify({"ok": True, "media_id": media_id, "size": len(content)})
+
+
 # ---------------- Scheduled jobs ----------------
 @app.route("/scheduled")
 @login_required
@@ -888,7 +953,28 @@ def batches():
 def campaigns():
     camps = db.list_campaigns()
     templates = db.get_templates()
+    # Tag each campaign with its template's header_type so the UI can
+    # conditionally show the per-campaign banner upload control.
+    tpl_header = {t["name"]: (t.get("header_type") or "") for t in templates}
+    for c in camps:
+        c["template_header_type"] = tpl_header.get(c.get("template_name"), "")
     return render_template("campaigns.html", campaigns=camps, templates=templates)
+
+
+def _collect_campaign_variables(form):
+    """Pull var_1, var_2, … var_N from a form, in order, with no upper cap.
+    Preserves position for empty values so {{N}} placeholders stay aligned
+    with what the operator typed."""
+    pairs = []
+    for key in form.keys():
+        if key.startswith("var_"):
+            try:
+                idx = int(key[4:])
+            except ValueError:
+                continue
+            pairs.append((idx, form.get(key, "").strip()))
+    pairs.sort(key=lambda kv: kv[0])
+    return [v for _, v in pairs]
 
 
 @app.route("/campaigns/create", methods=["POST"])
@@ -896,12 +982,7 @@ def campaigns():
 def campaigns_create():
     name          = request.form.get("name", "").strip()
     template_name = request.form.get("template_name", "").strip()
-    # Collect variable values var_1, var_2, var_3 …
-    variables = []
-    for i in range(1, 6):
-        v = request.form.get(f"var_{i}", "").strip()
-        if v:
-            variables.append(v)
+    variables = _collect_campaign_variables(request.form)
     if not name or not template_name:
         flash("Campaign name and template are required", "error")
         return redirect(url_for("campaigns"))
@@ -915,11 +996,7 @@ def campaigns_create():
 def campaigns_edit(campaign_id):
     name          = request.form.get("name", "").strip()
     template_name = request.form.get("template_name", "").strip()
-    variables = []
-    for i in range(1, 6):
-        v = request.form.get(f"var_{i}", "").strip()
-        if v:
-            variables.append(v)
+    variables = _collect_campaign_variables(request.form)
     if not name or not template_name:
         flash("Name and template are required", "error")
     else:
@@ -981,11 +1058,66 @@ def campaigns_send(campaign_id):
         batch_id = scheduler.start_send_thread(
             passengers, camp["template_name"], batch_name,
             session["user_id"], fixed_params=camp["variables"],
+            header_media_id_override=camp.get("header_media_id"),
         )
         db.update_campaign_last_used(campaign_id)
         return redirect(url_for("send_progress", batch_id=batch_id))
 
     return render_template("campaign_send.html", campaign=camp, template=template)
+
+
+@app.route("/campaigns/<int:campaign_id>/upload-image", methods=["POST"])
+@login_required
+def campaigns_upload_image(campaign_id):
+    """Attach a per-campaign banner image. Same approved template can serve
+    many use-cases (Diwali, Monsoon, Holiday…), each with its own banner.
+
+    Flow:
+      1. Validate file (≤5 MB, image MIME)
+      2. Upload to Meta Media API → fresh media_id (lasts ~30 days)
+      3. Store on the campaign — overrides template's default at send time
+    """
+    camp = db.get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"ok": False, "error": "campaign not found"}), 404
+    template = db.get_template_by_name(camp["template_name"])
+    if not template or (template.get("header_type") or "").upper() != "IMAGE":
+        return jsonify({"ok": False, "error": "this campaign's template has no image header"}), 400
+
+    files = [f for f in request.files.getlist("image") if f.filename]
+    if not files:
+        return jsonify({"ok": False, "error": "no file provided"}), 400
+    f = files[0]
+    content = f.read()
+    if not content:
+        return jsonify({"ok": False, "error": "empty file"}), 400
+    if len(content) > 5 * 1024 * 1024:
+        return jsonify({"ok": False, "error": "image too large (max 5 MB)"}), 400
+    mime = (f.mimetype or "").lower() or "image/jpeg"
+    if not mime.startswith("image/"):
+        return jsonify({"ok": False, "error": "file must be an image"}), 400
+
+    api = WhatsAppAPI()
+    if not api.is_configured():
+        return jsonify({"ok": False, "error": "WhatsApp API not configured"}), 400
+
+    media_id = api.upload_media(content, mime, filename=f"camp_{campaign_id}")
+    if not media_id:
+        return jsonify({"ok": False, "error": "Meta refused the upload (check size/format)"}), 502
+
+    db.update_campaign_image(campaign_id, media_id, mime, len(content))
+    return jsonify({"ok": True, "media_id": media_id, "size": len(content)})
+
+
+@app.route("/campaigns/<int:campaign_id>/clear-image", methods=["POST"])
+@login_required
+def campaigns_clear_image(campaign_id):
+    """Drop the per-campaign override; campaign reverts to template's default."""
+    camp = db.get_campaign(campaign_id)
+    if not camp:
+        return jsonify({"ok": False, "error": "campaign not found"}), 404
+    db.clear_campaign_image(campaign_id)
+    return jsonify({"ok": True})
 
 
 # ---------------- Review Follow-up ----------------
@@ -1519,6 +1651,7 @@ def inbox_send_template():
         phone_clean, tpl_name, tpl["language"], params,
         header_type=tpl.get("header_type"),
         header_example=tpl.get("header_example"),
+        header_media_id=tpl.get("header_media_id"),
     )
     if not ok:
         return jsonify({"ok": False, "error": result}), 400

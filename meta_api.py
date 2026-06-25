@@ -43,27 +43,34 @@ class WhatsAppAPI:
             return False, str(e)
 
     def send_template(self, to_phone, template_name, language, parameters,
-                       header_type=None, header_example=None):
+                       header_type=None, header_example=None, header_media_id=None):
         """
         Send a template message.
-        to_phone:        E.164 format without + (e.g., '919913191384')
-        parameters:      list of strings for {{1}}, {{2}}, etc. in the body
-        header_type:     None / "TEXT" / "IMAGE" / "VIDEO" / "DOCUMENT".
-                         Media-header templates MUST be sent with a
-                         matching header component or Meta returns 132012.
-        header_example:  URL of the example media Meta stored when the
-                         template was created — works as the send URL too.
+        to_phone:         E.164 format without + (e.g., '919913191384')
+        parameters:       list of strings for {{1}}, {{2}}, etc. in the body
+        header_type:      None / "TEXT" / "IMAGE" / "VIDEO" / "DOCUMENT".
+                          Media-header templates MUST be sent with a
+                          matching header component or Meta returns 132012.
+        header_media_id:  PREFERRED — Meta media_id from upload_media().
+                          This is the only reliable way to send media
+                          headers; the example URL alone usually fails.
+        header_example:   Fallback URL (kept for back-compat).
         Returns: (success: bool, message_id_or_error: str)
         """
         url = f"{self.base_url}/{self.phone_number_id}/messages"
         components = []
 
         # Header (image / video / document) — Meta requires this to match
-        # the template's declared format, even if you used the example URL.
+        # the template's declared format.
         ht = (header_type or "").upper()
-        if ht in ("IMAGE", "VIDEO", "DOCUMENT") and header_example:
+        if ht in ("IMAGE", "VIDEO", "DOCUMENT") and (header_media_id or header_example):
             kind = ht.lower()
-            media = {"link": header_example}
+            if header_media_id:
+                media = {"id": header_media_id}
+            else:
+                # Fallback to URL — will likely fail for scontent.whatsapp.net
+                # URLs but kept so the call doesn't 132012 outright.
+                media = {"link": header_example}
             if kind == "document":
                 # Meta wants a display filename for documents
                 media["filename"] = "Savan_Travels.pdf"
@@ -215,6 +222,37 @@ class WhatsAppAPI:
         except Exception as e:
             return {"error": str(e)}
 
+    def upload_media(self, content_bytes, mime_type, filename="media"):
+        """Upload bytes to Meta's Media API, return media_id (valid ~30 days).
+
+        Used to re-host template header media: Meta's `header_handle` URLs
+        in template metadata (scontent.whatsapp.net/...) cannot be used as
+        media sources during send — they're internal CDN URLs. The fix is
+        to upload our own copy and reference it via media_id.
+        """
+        if not self.is_configured() or not content_bytes:
+            return None
+        url = f"{self.base_url}/{self.phone_number_id}/media"
+        # Pick a sensible extension based on the MIME type for the filename
+        ext_for = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+                   "video/mp4": ".mp4", "application/pdf": ".pdf"}
+        fname = filename + ext_for.get((mime_type or "").lower(), "")
+        try:
+            r = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {self.token}"},
+                data={"messaging_product": "whatsapp", "type": mime_type or "image/jpeg"},
+                files={"file": (fname, content_bytes, mime_type or "image/jpeg")},
+                timeout=30,
+            )
+            if r.status_code != 200:
+                print(f"[upload_media] {r.status_code}: {r.text[:200]}")
+                return None
+            return (r.json() or {}).get("id")
+        except Exception as e:
+            print(f"[upload_media] {e}")
+            return None
+
     def download_media(self, media_id):
         """Download an incoming media file by its media_id.
 
@@ -278,7 +316,8 @@ class WhatsAppAPI:
                 body            = ""
                 var_count       = 0
                 header_type     = None    # None / "TEXT" / "IMAGE" / "VIDEO" / "DOCUMENT"
-                header_example  = None    # example media URL when format is IMAGE/VIDEO/DOCUMENT
+                header_example  = None    # raw Meta preview URL (kept for ref / fallback)
+                header_media_id = None    # what we'll use when sending
                 buttons         = None    # raw buttons list JSON-encoded
 
                 for comp in tpl.get("components", []):
@@ -293,6 +332,23 @@ class WhatsAppAPI:
                             handles = (comp.get("example") or {}).get("header_handle") or []
                             if handles:
                                 header_example = handles[0]
+                                # Don't re-host if the user has uploaded a custom image —
+                                # preserve their choice across syncs. Lookup the existing
+                                # row lazily so a brand-new template still gets a media_id.
+                                from database import get_template_by_name
+                                existing = get_template_by_name(name)
+                                if existing and (existing.get("header_image_is_custom") or 0):
+                                    header_media_id = existing.get("header_media_id")
+                                else:
+                                    try:
+                                        img = requests.get(header_example, timeout=30)
+                                        if img.status_code == 200 and img.content:
+                                            mime = img.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                                            header_media_id = self.upload_media(
+                                                img.content, mime, filename=name,
+                                            )
+                                    except Exception as e:
+                                        print(f"[fetch_templates] header re-host failed for {name}: {e}")
                     elif ctype == "BUTTONS":
                         try:
                             buttons = _json.dumps(comp.get("buttons") or [])
@@ -302,7 +358,7 @@ class WhatsAppAPI:
                 upsert_template(
                     name, language, category, body, var_count, status,
                     header_type=header_type, header_example=header_example,
-                    buttons=buttons,
+                    header_media_id=header_media_id, buttons=buttons,
                 )
                 synced += 1
             return True, f"Synced {synced} templates"

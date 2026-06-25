@@ -15,6 +15,11 @@
   .empty-state { text-align:center; padding:48px 20px; color:#cbd5e1; }
   .empty-state .icon { font-size:48px; margin-bottom:12px; }
   .right-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; position:sticky; top:20px; }
+  .banner-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:6px; padding:8px 10px; background:#f8fafc; border:1px solid var(--border); border-radius:8px; }
+  .banner-status { font-size:12px; }
+  .banner-custom { color:var(--success, #10b981); font-weight:600; }
+  .banner-default { color:#94a3b8; }
+  .banner-form { margin-left:auto !important; }
 </style>
 
 <div class="camp-grid">
@@ -39,6 +44,35 @@
               {% for v in c.variables %}
               <div class="var-pill"><span>{{"{{"}}{{ loop.index }}{{"}}"}}</span>{{ v }}</div>
               {% endfor %}
+            </div>
+            {% endif %}
+
+            {# Per-campaign banner image — overrides template default at send time #}
+            {% if c.template_header_type == 'IMAGE' %}
+            <div class="banner-row">
+              <span style="font-size:12px;font-weight:600;color:#475569;">📷 Banner:</span>
+              {% if c.header_media_id %}
+                <span class="banner-status banner-custom">
+                  ✓ Custom — {{ c.header_image_uploaded_at[:10] if c.header_image_uploaded_at else 'uploaded' }}
+                </span>
+              {% else %}
+                <span class="banner-status banner-default">Using template's default</span>
+              {% endif %}
+              <form action="{{ url_for('campaigns_upload_image', campaign_id=c.id) }}"
+                    method="POST" enctype="multipart/form-data"
+                    class="banner-form" style="margin:0;display:inline-flex;gap:6px;align-items:center;">
+                <input type="file" name="image" accept="image/jpeg,image/png,image/webp"
+                       class="banner-file" id="banner-file-{{ c.id }}" style="display:none;">
+                <label for="banner-file-{{ c.id }}" class="btn btn-ghost btn-sm" style="cursor:pointer;font-size:11.5px;padding:3px 10px;">
+                  ↑ {% if c.header_media_id %}Replace{% else %}Add banner{% endif %}
+                </label>
+                {% if c.header_media_id %}
+                <button type="button" class="btn btn-ghost btn-sm banner-clear"
+                        data-id="{{ c.id }}"
+                        style="font-size:11.5px;padding:3px 10px;color:#ef4444;">✕</button>
+                {% endif %}
+                <span class="banner-msg" style="font-size:11px;color:#94a3b8;"></span>
+              </form>
             </div>
             {% endif %}
           </div>
@@ -214,6 +248,67 @@ document.addEventListener('click', function(e) {
   var btn = e.target.closest('.edit-btn');
   if (!btn) return;
   loadEdit(btn.dataset.id);
+});
+
+/* ── Per-campaign banner upload (AJAX, multipart) ───────────────────────────
+   One approved template can power many campaigns — Diwali, Monsoon, Holiday —
+   each with its own banner. Upload here goes to Meta Media API and the
+   returned media_id is stored on the campaign. */
+document.querySelectorAll('.banner-file').forEach(function(input) {
+  input.addEventListener('change', function() {
+    if (!input.files || !input.files[0]) return;
+    var form = input.closest('form');
+    var msg  = form.querySelector('.banner-msg');
+    var file = input.files[0];
+
+    if (file.size > 5 * 1024 * 1024) {
+      msg.textContent = '✗ Too large (max 5 MB)';
+      msg.style.color = '#ef4444';
+      input.value = '';
+      return;
+    }
+
+    msg.textContent = '⏳ Uploading…';
+    msg.style.color = '#94a3b8';
+
+    var fd = new FormData();
+    fd.append('image', file);
+    fetch(form.action, { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.ok) {
+          msg.textContent = '✓ Uploaded — refreshing…';
+          msg.style.color = '#10b981';
+          setTimeout(function() { location.reload(); }, 700);
+        } else {
+          msg.textContent = '✗ ' + (d.error || 'upload failed');
+          msg.style.color = '#ef4444';
+        }
+      })
+      .catch(function(e) {
+        msg.textContent = '✗ ' + e.message;
+        msg.style.color = '#ef4444';
+      });
+  });
+});
+
+/* ── Clear per-campaign banner (revert to template default) ─────────────── */
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.banner-clear');
+  if (!btn) return;
+  if (!confirm('Remove this campaign\'s custom banner? It will revert to the template\'s default image.')) return;
+  var id  = btn.dataset.id;
+  var msg = btn.parentElement.querySelector('.banner-msg');
+  if (msg) { msg.textContent = '⏳ Removing…'; msg.style.color = '#94a3b8'; }
+  fetch('/campaigns/' + id + '/clear-image', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { location.reload(); }
+      else if (msg) { msg.textContent = '✗ ' + (d.error || 'failed'); msg.style.color = '#ef4444'; }
+    })
+    .catch(function(e) {
+      if (msg) { msg.textContent = '✗ ' + e.message; msg.style.color = '#ef4444'; }
+    });
 });
 </script>
 {% endblock %}

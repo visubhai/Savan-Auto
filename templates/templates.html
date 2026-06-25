@@ -27,6 +27,13 @@
           <span class="status-dot badge-{{ t.status }}">{{ t.status }}</span>
           <span class="status-dot badge-{{ t.category|lower }}">{{ t.category }}</span>
           <span style="font-size:11px;color:var(--muted);">{{ t.language }}</span>
+          {% if t.header_type == 'IMAGE' %}
+          <span style="background:var(--primary-dim);color:var(--primary-dark);font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;">📷 IMAGE HEADER</span>
+          {% elif t.header_type == 'VIDEO' %}
+          <span style="background:var(--primary-dim);color:var(--primary-dark);font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;">🎬 VIDEO HEADER</span>
+          {% elif t.header_type == 'DOCUMENT' %}
+          <span style="background:var(--primary-dim);color:var(--primary-dark);font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;">📄 DOC HEADER</span>
+          {% endif %}
           {% if t.is_default %}
           <span style="background:var(--amber-dim);color:var(--amber);font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;">DEFAULT</span>
           {% endif %}
@@ -36,6 +43,33 @@
         <div class="card2" style="padding:14px;margin-bottom:12px;">
           <pre style="font-family:'DM Sans',sans-serif;font-size:13px;color:#475569;white-space:pre-wrap;line-height:1.65;margin:0;">{{ t.body }}</pre>
         </div>
+
+        {# Header image controls — only for image-header templates #}
+        {% if t.header_type == 'IMAGE' %}
+        <div class="card2" style="padding:12px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <span style="font-size:13px;font-weight:600;color:var(--text);">📷 Header image:</span>
+          {% if t.header_image_is_custom %}
+            <span style="font-size:12px;color:var(--success);font-weight:600;">✓ Custom — uploaded
+              {% if t.header_image_uploaded_at %}{{ t.header_image_uploaded_at[:10] }}{% endif %}
+            </span>
+          {% elif t.header_media_id %}
+            <span style="font-size:12px;color:var(--muted);">Using Meta's approval-time image</span>
+          {% else %}
+            <span style="font-size:12px;color:var(--error);">⚠ Not yet rehosted — click Sync Templates first</span>
+          {% endif %}
+          <form action="{{ url_for('templates_upload_image', name=t.name) }}"
+                method="POST" enctype="multipart/form-data" class="hdrimg-form"
+                data-template="{{ t.name }}"
+                style="margin:0;margin-left:auto;display:flex;gap:8px;align-items:center;">
+            <input type="file" name="image" accept="image/jpeg,image/png,image/webp"
+                   class="hdrimg-file" id="hdrimg-{{ t.name }}" style="display:none;">
+            <label for="hdrimg-{{ t.name }}" class="btn btn-ghost btn-sm" style="cursor:pointer;">
+              ↑ Change image
+            </label>
+            <span class="hdrimg-status" style="font-size:11.5px;color:var(--muted);"></span>
+          </form>
+        </div>
+        {% endif %}
 
         <div style="font-size:12px;color:var(--muted);">
           {{ t.variable_count }} variable{{ 's' if t.variable_count != 1 else '' }}
@@ -62,5 +96,48 @@
   </div>
   {% endfor %}
 </div>
+
+<script>
+// Per-template header image upload — sends multipart, no page reload
+// until the upload completes, then refreshes so "Custom — uploaded today"
+// shows immediately.
+document.querySelectorAll('.hdrimg-file').forEach(function(input) {
+  input.addEventListener('change', function() {
+    if (!input.files || !input.files[0]) return;
+    const form   = input.closest('form');
+    const status = form.querySelector('.hdrimg-status');
+    const file   = input.files[0];
+
+    if (file.size > 5 * 1024 * 1024) {
+      status.textContent = '✗ Too large (max 5 MB)';
+      status.style.color = 'var(--error)';
+      input.value = '';
+      return;
+    }
+
+    status.textContent = '⏳ Uploading to Meta…';
+    status.style.color = 'var(--muted)';
+
+    const fd = new FormData();
+    fd.append('image', file);
+    fetch(form.action, { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.ok) {
+          status.textContent = '✓ Uploaded — refreshing…';
+          status.style.color = 'var(--success)';
+          setTimeout(function() { location.reload(); }, 700);
+        } else {
+          status.textContent = '✗ ' + (d.error || 'upload failed');
+          status.style.color = 'var(--error)';
+        }
+      })
+      .catch(function(e) {
+        status.textContent = '✗ ' + e.message;
+        status.style.color = 'var(--error)';
+      });
+  });
+});
+</script>
 
 {% endblock %}

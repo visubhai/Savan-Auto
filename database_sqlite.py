@@ -141,7 +141,11 @@ def init_db():
             template_name TEXT NOT NULL,
             variables TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
-            last_used_at TEXT
+            last_used_at TEXT,
+            header_media_id TEXT,
+            header_image_uploaded_at TEXT,
+            header_image_size INTEGER,
+            header_image_mime TEXT
         );
 
         CREATE TABLE IF NOT EXISTS chats (
@@ -190,9 +194,26 @@ def init_db():
     # Migration: add header columns to older templates tables
     with get_db() as db:
         cols = {r["name"] for r in db.execute("PRAGMA table_info(templates)").fetchall()}
-        for col in ("header_type", "header_example", "buttons"):
+        for col in ("header_type", "header_example", "header_media_id", "buttons",
+                    "header_image_uploaded_at", "header_image_mime"):
             if col not in cols:
                 db.execute(f"ALTER TABLE templates ADD COLUMN {col} TEXT")
+        if "header_image_is_custom" not in cols:
+            db.execute("ALTER TABLE templates ADD COLUMN header_image_is_custom INTEGER DEFAULT 0")
+        if "header_image_size" not in cols:
+            db.execute("ALTER TABLE templates ADD COLUMN header_image_size INTEGER")
+
+    # Migration: add per-campaign header-image override columns. One approved
+    # WhatsApp template can serve many use-cases (Diwali, Monsoon, Holiday…);
+    # each campaign can store its own banner media_id which overrides the
+    # template's default at send time.
+    with get_db() as db:
+        cols = {r["name"] for r in db.execute("PRAGMA table_info(campaigns)").fetchall()}
+        for col in ("header_media_id", "header_image_uploaded_at", "header_image_mime"):
+            if col not in cols:
+                db.execute(f"ALTER TABLE campaigns ADD COLUMN {col} TEXT")
+        if "header_image_size" not in cols:
+            db.execute("ALTER TABLE campaigns ADD COLUMN header_image_size INTEGER")
 
     # Seed default admin if no users exist
     with get_db() as db:
@@ -312,29 +333,47 @@ def get_template_by_name(name):
 
 
 def upsert_template(name, language, category, body, variable_count, status,
-                     header_type=None, header_example=None, buttons=None):
+                     header_type=None, header_example=None, header_media_id=None,
+                     buttons=None):
     with get_db() as db:
         existing = db.execute("SELECT id FROM templates WHERE name=?", (name,)).fetchone()
         if existing:
             db.execute(
                 """UPDATE templates SET language=?, category=?, body=?,
                    variable_count=?, status=?,
-                   header_type=?, header_example=?, buttons=?,
+                   header_type=?, header_example=?, header_media_id=?, buttons=?,
                    synced_at=datetime('now', '+330 minutes')
                    WHERE name=?""",
                 (language, category, body, variable_count, status,
-                 header_type, header_example, buttons, name),
+                 header_type, header_example, header_media_id, buttons, name),
             )
         else:
             db.execute(
                 """INSERT INTO templates (name, language, category, body,
                    variable_count, status, header_type, header_example,
-                   buttons, synced_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                   header_media_id, buttons, synced_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                            datetime('now', '+330 minutes'))""",
                 (name, language, category, body, variable_count, status,
-                 header_type, header_example, buttons),
+                 header_type, header_example, header_media_id, buttons),
             )
+
+
+def update_template_meta(name, **fields):
+    """Update arbitrary columns on a template row. Silently ignores
+    fields that don't exist as columns yet — keeps the SQLite path
+    forward-compatible with MongoDB-only fields."""
+    clean = {k: v for k, v in fields.items() if v is not None}
+    if not clean:
+        return
+    with get_db() as db:
+        cols = {r["name"] for r in db.execute("PRAGMA table_info(templates)").fetchall()}
+        valid = {k: v for k, v in clean.items() if k in cols}
+        if not valid:
+            return
+        sets   = ", ".join(f"{k}=?" for k in valid)
+        params = list(valid.values()) + [name]
+        db.execute(f"UPDATE templates SET {sets} WHERE name=?", params)
 
 
 def set_default_template(name):
@@ -818,6 +857,36 @@ def update_campaign_last_used(campaign_id):
 def delete_campaign(campaign_id):
     with get_db() as db:
         db.execute("DELETE FROM campaigns WHERE id=?", (int(campaign_id),))
+
+
+def update_campaign_image(campaign_id, media_id, mime_type, size_bytes):
+    """Attach a per-campaign banner image (Meta media_id) that overrides
+    the template's default header image at send time. Idempotent."""
+    with get_db() as db:
+        db.execute(
+            """UPDATE campaigns
+                  SET header_media_id          = ?,
+                      header_image_mime        = ?,
+                      header_image_size        = ?,
+                      header_image_uploaded_at = datetime('now', '+330 minutes')
+                WHERE id = ?""",
+            (media_id, mime_type, int(size_bytes), int(campaign_id)),
+        )
+
+
+def clear_campaign_image(campaign_id):
+    """Remove the per-campaign image override; campaign reverts to using
+    the template's default header image."""
+    with get_db() as db:
+        db.execute(
+            """UPDATE campaigns
+                  SET header_media_id          = NULL,
+                      header_image_mime        = NULL,
+                      header_image_size        = NULL,
+                      header_image_uploaded_at = NULL
+                WHERE id = ?""",
+            (int(campaign_id),),
+        )
 
 
 # ---------------- User management ----------------

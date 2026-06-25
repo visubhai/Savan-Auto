@@ -17,13 +17,18 @@ from meta_api import WhatsAppAPI
 RUNNING_BATCHES = {}
 
 
-def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=None, var_overrides=None):
+def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=None,
+               var_overrides=None, header_media_id_override=None):
     """Send a batch of messages. Runs in a background thread.
 
     var_overrides: optional dict {var_index(str/int): fixed_value}. When a value
     is provided for a variable position, that fixed value is used for ALL
     passengers in the batch (instead of the auto per-passenger value). Useful
     when a template needs variables that aren't present in the CSV.
+
+    header_media_id_override: optional Meta media_id. When set, overrides the
+    template's default header image for this batch. Lets one approved template
+    power many use-cases (Diwali, Monsoon, Holiday…) each with its own banner.
     """
     template = get_template_by_name(template_name)
     if not template:
@@ -109,6 +114,7 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
             p["phone"], template_name, language, params,
             header_type=template.get("header_type"),
             header_example=template.get("header_example"),
+            header_media_id=(header_media_id_override or template.get("header_media_id")),
         )
 
         if success:
@@ -136,12 +142,14 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
     RUNNING_BATCHES[batch_id]["status"] = "completed"
 
 
-def start_send_thread(passengers, template_name, batch_name, user_id, fixed_params=None, var_overrides=None):
+def start_send_thread(passengers, template_name, batch_name, user_id, fixed_params=None,
+                      var_overrides=None, header_media_id_override=None):
     """Create a batch and start a sending thread. Returns batch_id."""
     batch_id = create_batch(batch_name, template_name, len(passengers), user_id)
     thread = threading.Thread(
         target=send_batch,
-        args=(batch_id, passengers, template_name, user_id, fixed_params, var_overrides),
+        args=(batch_id, passengers, template_name, user_id, fixed_params,
+              var_overrides, header_media_id_override),
         daemon=True,
     )
     thread.start()
