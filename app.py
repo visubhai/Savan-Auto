@@ -1515,7 +1515,11 @@ def inbox_send_template():
     api = WhatsAppAPI()
     if not api.is_configured():
         return jsonify({"ok": False, "error": "WhatsApp API not configured"}), 400
-    ok, result = api.send_template(phone_clean, tpl_name, tpl["language"], params)
+    ok, result = api.send_template(
+        phone_clean, tpl_name, tpl["language"], params,
+        header_type=tpl.get("header_type"),
+        header_example=tpl.get("header_example"),
+    )
     if not ok:
         return jsonify({"ok": False, "error": result}), 400
 

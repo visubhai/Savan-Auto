@@ -266,7 +266,8 @@ else:
     def get_template_by_name(name):
         return _clean(_db().templates.find_one({"name": name}))
 
-    def upsert_template(name, language, category, body, variable_count, status):
+    def upsert_template(name, language, category, body, variable_count, status,
+                         header_type=None, header_example=None, buttons=None):
         _db().templates.update_one(
             {"name": name},
             {"$set": {
@@ -275,6 +276,11 @@ else:
                 "body": body,
                 "variable_count": variable_count,
                 "status": status,
+                # Header metadata — needed so send_template can include the
+                # right header component for IMAGE/VIDEO/DOCUMENT templates.
+                "header_type":    header_type,
+                "header_example": header_example,
+                "buttons":        buttons,
                 "synced_at": _now(),
             },
              "$setOnInsert": {

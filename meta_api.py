@@ -42,15 +42,38 @@ class WhatsAppAPI:
         except Exception as e:
             return False, str(e)
 
-    def send_template(self, to_phone, template_name, language, parameters):
+    def send_template(self, to_phone, template_name, language, parameters,
+                       header_type=None, header_example=None):
         """
         Send a template message.
-        to_phone: E.164 format without + (e.g., '919913191384')
-        parameters: list of strings for {{1}}, {{2}}, etc.
+        to_phone:        E.164 format without + (e.g., '919913191384')
+        parameters:      list of strings for {{1}}, {{2}}, etc. in the body
+        header_type:     None / "TEXT" / "IMAGE" / "VIDEO" / "DOCUMENT".
+                         Media-header templates MUST be sent with a
+                         matching header component or Meta returns 132012.
+        header_example:  URL of the example media Meta stored when the
+                         template was created — works as the send URL too.
         Returns: (success: bool, message_id_or_error: str)
         """
         url = f"{self.base_url}/{self.phone_number_id}/messages"
         components = []
+
+        # Header (image / video / document) — Meta requires this to match
+        # the template's declared format, even if you used the example URL.
+        ht = (header_type or "").upper()
+        if ht in ("IMAGE", "VIDEO", "DOCUMENT") and header_example:
+            kind = ht.lower()
+            media = {"link": header_example}
+            if kind == "document":
+                # Meta wants a display filename for documents
+                media["filename"] = "Savan_Travels.pdf"
+            components.append({
+                "type": "header",
+                "parameters": [{"type": kind, kind: media}],
+            })
+        # TEXT-header templates with a {{1}} in the header would need a
+        # separate text parameter — handle that day we add such a template.
+
         if parameters:
             components.append({
                 "type": "body",
@@ -226,7 +249,15 @@ class WhatsAppAPI:
             return None, None
 
     def fetch_templates(self):
-        """Fetch all approved templates from Meta and sync to DB."""
+        """Fetch all approved templates from Meta and sync to DB.
+
+        Captures body + variable count AND header metadata
+        (TEXT / IMAGE / VIDEO / DOCUMENT) + the example media URL Meta
+        returns. This is what lets send_template include the header
+        component — without it, Meta rejects with error 132012
+        "Parameter format does not match" for any template that has
+        a media header.
+        """
         if not self.token or not self.waba_id:
             return False, "Token or WABA ID not set"
         url = f"{self.base_url}/{self.waba_id}/message_templates"
@@ -236,23 +267,43 @@ class WhatsAppAPI:
             if r.status_code != 200:
                 return False, f"Error {r.status_code}: {r.text[:200]}"
             data = r.json().get("data", [])
+            import re, json as _json
             synced = 0
             for tpl in data:
-                name = tpl.get("name")
-                language = tpl.get("language", "en")
-                category = tpl.get("category", "UTILITY")
-                status = tpl.get("status", "unknown").lower()
-                # Extract body and variable count
-                body = ""
-                var_count = 0
+                name      = tpl.get("name")
+                language  = tpl.get("language", "en")
+                category  = tpl.get("category", "UTILITY")
+                status    = tpl.get("status", "unknown").lower()
+
+                body            = ""
+                var_count       = 0
+                header_type     = None    # None / "TEXT" / "IMAGE" / "VIDEO" / "DOCUMENT"
+                header_example  = None    # example media URL when format is IMAGE/VIDEO/DOCUMENT
+                buttons         = None    # raw buttons list JSON-encoded
+
                 for comp in tpl.get("components", []):
-                    if comp.get("type") == "BODY":
-                        body = comp.get("text", "")
-                        # Count {{n}} occurrences
-                        import re
+                    ctype = (comp.get("type") or "").upper()
+                    if ctype == "BODY":
+                        body = comp.get("text", "") or ""
                         vars_found = re.findall(r"\{\{(\d+)\}\}", body)
                         var_count = len(set(vars_found))
-                upsert_template(name, language, category, body, var_count, status)
+                    elif ctype == "HEADER":
+                        header_type = (comp.get("format") or "").upper() or None
+                        if header_type in ("IMAGE", "VIDEO", "DOCUMENT"):
+                            handles = (comp.get("example") or {}).get("header_handle") or []
+                            if handles:
+                                header_example = handles[0]
+                    elif ctype == "BUTTONS":
+                        try:
+                            buttons = _json.dumps(comp.get("buttons") or [])
+                        except Exception:
+                            buttons = None
+
+                upsert_template(
+                    name, language, category, body, var_count, status,
+                    header_type=header_type, header_example=header_example,
+                    buttons=buttons,
+                )
                 synced += 1
             return True, f"Synced {synced} templates"
         except Exception as e:

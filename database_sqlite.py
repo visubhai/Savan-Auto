@@ -187,6 +187,13 @@ def init_db():
         if "raw_payload" not in cols:
             db.execute("ALTER TABLE chats ADD COLUMN raw_payload TEXT")
 
+    # Migration: add header columns to older templates tables
+    with get_db() as db:
+        cols = {r["name"] for r in db.execute("PRAGMA table_info(templates)").fetchall()}
+        for col in ("header_type", "header_example", "buttons"):
+            if col not in cols:
+                db.execute(f"ALTER TABLE templates ADD COLUMN {col} TEXT")
+
     # Seed default admin if no users exist
     with get_db() as db:
         cur = db.execute("SELECT COUNT(*) as c FROM users")
@@ -304,22 +311,29 @@ def get_template_by_name(name):
         return db.execute("SELECT * FROM templates WHERE name=?", (name,)).fetchone()
 
 
-def upsert_template(name, language, category, body, variable_count, status):
+def upsert_template(name, language, category, body, variable_count, status,
+                     header_type=None, header_example=None, buttons=None):
     with get_db() as db:
         existing = db.execute("SELECT id FROM templates WHERE name=?", (name,)).fetchone()
         if existing:
             db.execute(
                 """UPDATE templates SET language=?, category=?, body=?,
-                   variable_count=?, status=?, synced_at=datetime('now', '+330 minutes')
+                   variable_count=?, status=?,
+                   header_type=?, header_example=?, buttons=?,
+                   synced_at=datetime('now', '+330 minutes')
                    WHERE name=?""",
-                (language, category, body, variable_count, status, name),
+                (language, category, body, variable_count, status,
+                 header_type, header_example, buttons, name),
             )
         else:
             db.execute(
                 """INSERT INTO templates (name, language, category, body,
-                   variable_count, status, synced_at)
-                   VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+330 minutes'))""",
-                (name, language, category, body, variable_count, status),
+                   variable_count, status, header_type, header_example,
+                   buttons, synced_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           datetime('now', '+330 minutes'))""",
+                (name, language, category, body, variable_count, status,
+                 header_type, header_example, buttons),
             )
 
 

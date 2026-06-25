@@ -106,7 +106,9 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
         RUNNING_BATCHES[batch_id]["current_name"] = p.get("name", "")
 
         success, result = api.send_template(
-            p["phone"], template_name, language, params
+            p["phone"], template_name, language, params,
+            header_type=template.get("header_type"),
+            header_example=template.get("header_example"),
         )
 
         if success:
