@@ -11,9 +11,12 @@
   .conv-search { padding:12px; border-bottom:1px solid var(--border); }
   .conv-search input { width:100%; background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:8px 12px; color:#1e293b; font-size:13px; outline:none; }
   .conv-search input:focus { border-color:var(--amber); }
-  .conv-item { display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; border-bottom:1px solid var(--border); transition:background .12s; text-decoration:none; color:inherit; }
+  .conv-item { display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; border-bottom:1px solid var(--border); transition:background .12s; text-decoration:none; color:inherit; position:relative; }
   .conv-item:hover { background:rgba(255,255,255,.04); }
   .conv-item.active { background:var(--amber-dim); }
+  .conv-del { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:#fef2f2; border:1px solid #fecaca; color:#dc2626; width:26px; height:26px; border-radius:6px; display:none; align-items:center; justify-content:center; font-size:13px; cursor:pointer; padding:0; }
+  .conv-item:hover .conv-del { display:flex; }
+  .conv-del:hover { background:#fee2e2; }
   .conv-avatar { width:38px; height:38px; border-radius:50%; background:#e2e8f0; display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
   .conv-meta { flex:1; min-width:0; }
   .conv-name { font-size:13.5px; font-weight:600; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -124,6 +127,10 @@
               <div class="conv-badge">{{ c.unread }}</div>
             {% endif %}
           </div>
+          <button type="button" class="conv-del"
+                  data-phone="{{ c.phone }}"
+                  data-name="{{ c.customer_name or c.phone }}"
+                  title="Delete this conversation">🗑</button>
         </a>
         {% endfor %}
       {% else %}
@@ -146,6 +153,11 @@
         </div>
         <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
           <span class="window-badge" id="windowBadge">Checking…</span>
+          <button type="button" id="headerDelete"
+                  data-phone="{{ active_phone }}"
+                  data-name="{{ customer_name or active_phone }}"
+                  style="background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;"
+                  title="Delete this conversation">🗑 Delete chat</button>
         </div>
       </div>
 
@@ -533,5 +545,49 @@ function sendTemplateFromInbox() {
     btn.disabled = false; btn.textContent = 'Send template';
   });
 }
+
+/* ── Delete-conversation handlers ─────────────────────────────────────
+   Hard-deletes every message with one phone number. Used from two places:
+     1. trash icon on each row in the conversation list
+     2. "🗑 Delete chat" button in the active chat header
+*/
+function deleteConversation(phone, displayName, opts) {
+  opts = opts || {};
+  if (!phone) return;
+  if (!confirm('Delete entire conversation with ' + displayName + '?\n' +
+               'All messages will be permanently removed. This cannot be undone.')) {
+    return;
+  }
+  fetch('/api/inbox/' + encodeURIComponent(phone) + '/delete', { method: 'POST' })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { alert('Delete failed: ' + (d.error || 'unknown')); return; }
+      if (opts.wasActive) {
+        // We were viewing the deleted chat — go back to the empty inbox
+        window.location.href = {{ url_for('inbox')|tojson }};
+      } else {
+        // Just remove the row from the list
+        var row = document.querySelector('.conv-item[data-phone="' + phone.toLowerCase() + '"]');
+        if (row && row.parentNode) row.parentNode.removeChild(row);
+      }
+    })
+    .catch(function(e){ alert('Delete failed: ' + e.message); });
+}
+
+document.addEventListener('click', function(e) {
+  // Row-level trash icon — stop the <a> from navigating
+  var rowBtn = e.target.closest('.conv-del');
+  if (rowBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    deleteConversation(rowBtn.dataset.phone, rowBtn.dataset.name, { wasActive: false });
+    return;
+  }
+  // Header "Delete chat" button — only present when a chat is open
+  var hdrBtn = e.target.closest('#headerDelete');
+  if (hdrBtn) {
+    deleteConversation(hdrBtn.dataset.phone, hdrBtn.dataset.name, { wasActive: true });
+  }
+});
 </script>
 {% endblock %}

@@ -165,6 +165,18 @@ def init_db():
             storage_kind TEXT DEFAULT 'local'
         );
 
+        CREATE TABLE IF NOT EXISTS auto_replies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            trigger_label TEXT NOT NULL,
+            keywords TEXT NOT NULL DEFAULT '',
+            response_text TEXT NOT NULL,
+            show_in_menu INTEGER NOT NULL DEFAULT 0,
+            menu_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_messages_batch ON messages(batch_id);
         CREATE INDEX IF NOT EXISTS idx_messages_phone ON messages(customer_phone);
         CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status);
@@ -779,6 +791,14 @@ def mark_read(phone):
         )
 
 
+def delete_conversation(phone):
+    """Delete all chat messages for one phone number (entire conversation).
+    Returns the number of rows removed so the UI can show a confirmation."""
+    with get_db() as db:
+        cur = db.execute("DELETE FROM chats WHERE phone=?", (phone,))
+        return cur.rowcount
+
+
 def get_unread_count():
     with get_db() as db:
         return db.execute(
@@ -900,6 +920,106 @@ def change_user_password(user_id, new_hash):
 def delete_user(user_id):
     with get_db() as db:
         db.execute("DELETE FROM users WHERE id=?", (int(user_id),))
+
+
+# ---------------- Auto-replies ----------------
+#
+# Each row is one configurable customer-facing auto-reply.
+#   trigger_label : the human-readable name (also used as button title)
+#   keywords      : comma-separated text triggers (e.g. "office,number,phone")
+#   response_text : what we send back to the customer
+#   show_in_menu  : when True (and rank within top 3), appears as a tap-button
+#                   in the welcome menu we send on each inbound message
+def create_auto_reply(label, keywords, response_text, show_in_menu=False, menu_order=0):
+    with get_db() as db:
+        cur = db.execute(
+            """INSERT INTO auto_replies (trigger_label, keywords, response_text,
+                                          show_in_menu, menu_order)
+               VALUES (?, ?, ?, ?, ?)""",
+            (label.strip(), (keywords or "").strip(), response_text,
+             1 if show_in_menu else 0, int(menu_order or 0)),
+        )
+        return cur.lastrowid
+
+
+def list_auto_replies():
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM auto_replies ORDER BY show_in_menu DESC, menu_order ASC, id ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_auto_reply(reply_id):
+    with get_db() as db:
+        row = db.execute("SELECT * FROM auto_replies WHERE id=?", (int(reply_id),)).fetchone()
+        return dict(row) if row else None
+
+
+def update_auto_reply(reply_id, label, keywords, response_text, show_in_menu, menu_order):
+    with get_db() as db:
+        db.execute(
+            """UPDATE auto_replies
+                  SET trigger_label = ?,
+                      keywords      = ?,
+                      response_text = ?,
+                      show_in_menu  = ?,
+                      menu_order    = ?,
+                      updated_at    = datetime('now', '+330 minutes')
+                WHERE id = ?""",
+            (label.strip(), (keywords or "").strip(), response_text,
+             1 if show_in_menu else 0, int(menu_order or 0), int(reply_id)),
+        )
+
+
+def delete_auto_reply(reply_id):
+    with get_db() as db:
+        db.execute("DELETE FROM auto_replies WHERE id=?", (int(reply_id),))
+
+
+def set_auto_reply_enabled(reply_id, enabled):
+    with get_db() as db:
+        db.execute(
+            "UPDATE auto_replies SET enabled=?, updated_at=datetime('now', '+330 minutes') WHERE id=?",
+            (1 if enabled else 0, int(reply_id)),
+        )
+
+
+def get_menu_button_replies():
+    """Return up to 3 enabled auto-replies flagged for the welcome menu.
+    WhatsApp interactive button messages allow at most 3 buttons."""
+    with get_db() as db:
+        rows = db.execute(
+            """SELECT * FROM auto_replies
+                WHERE enabled = 1 AND show_in_menu = 1
+                ORDER BY menu_order ASC, id ASC
+                LIMIT 3"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def find_auto_reply_by_text(text):
+    """Find the first enabled auto-reply whose trigger_label matches the text
+    exactly (case-insensitive — used for button taps) or whose comma-separated
+    keywords contain a word found in the text (case-insensitive substring)."""
+    if not text:
+        return None
+    needle = text.strip().lower()
+    if not needle:
+        return None
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM auto_replies WHERE enabled=1 ORDER BY show_in_menu DESC, menu_order ASC, id ASC"
+        ).fetchall()
+    for r in rows:
+        if (r["trigger_label"] or "").strip().lower() == needle:
+            return dict(r)
+    for r in rows:
+        for kw in (r["keywords"] or "").split(","):
+            kw = kw.strip().lower()
+            if kw and kw in needle:
+                return dict(r)
+    return None
 
 
 if __name__ == "__main__":

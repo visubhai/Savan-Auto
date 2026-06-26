@@ -45,8 +45,12 @@ if not MONGO_URI:
         update_campaign_last_used, delete_campaign,
         update_campaign_image, clear_campaign_image,
         save_chat_message, get_conversation, list_conversations, mark_read,
+        delete_conversation,
         get_unread_count, update_chat_status, get_new_messages,
         change_user_password, delete_user,
+        create_auto_reply, list_auto_replies, get_auto_reply,
+        update_auto_reply, delete_auto_reply, set_auto_reply_enabled,
+        get_menu_button_replies, find_auto_reply_by_text,
         init_db, hash_password, verify_password,
     )
 else:
@@ -734,6 +738,10 @@ else:
             {"$set": {"read": 1}},
         )
 
+    def delete_conversation(phone):
+        """Delete all chat messages for one phone number (entire conversation)."""
+        return _db().chats.delete_many({"phone": phone}).deleted_count
+
     def get_unread_count():
         return _db().chats.count_documents({"direction": "in", "read": 0})
 
@@ -748,6 +756,84 @@ else:
             _db().chats.find({"phone": phone, "id": {"$gt": int(after_id)}})
             .sort("timestamp", ASCENDING)
         )
+
+    # ── Auto-replies ──────────────────────────────────────────────────────────
+    # See database_sqlite.py for the field-by-field meaning. Mongo schema
+    # mirrors the SQLite row exactly so the calling code is identical.
+
+    def create_auto_reply(label, keywords, response_text, show_in_menu=False, menu_order=0):
+        new_id = _next_id("auto_replies")
+        _db().auto_replies.insert_one({
+            "id":            new_id,
+            "enabled":       1,
+            "trigger_label": (label or "").strip(),
+            "keywords":      (keywords or "").strip(),
+            "response_text": response_text,
+            "show_in_menu":  1 if show_in_menu else 0,
+            "menu_order":    int(menu_order or 0),
+            "created_at":    _now(),
+            "updated_at":    _now(),
+        })
+        return new_id
+
+    def list_auto_replies():
+        return _clean_many(
+            _db().auto_replies.find().sort(
+                [("show_in_menu", DESCENDING), ("menu_order", ASCENDING), ("id", ASCENDING)]
+            )
+        )
+
+    def get_auto_reply(reply_id):
+        return _clean(_db().auto_replies.find_one({"id": int(reply_id)}))
+
+    def update_auto_reply(reply_id, label, keywords, response_text, show_in_menu, menu_order):
+        _db().auto_replies.update_one({"id": int(reply_id)}, {"$set": {
+            "trigger_label": (label or "").strip(),
+            "keywords":      (keywords or "").strip(),
+            "response_text": response_text,
+            "show_in_menu":  1 if show_in_menu else 0,
+            "menu_order":    int(menu_order or 0),
+            "updated_at":    _now(),
+        }})
+
+    def delete_auto_reply(reply_id):
+        _db().auto_replies.delete_one({"id": int(reply_id)})
+
+    def set_auto_reply_enabled(reply_id, enabled):
+        _db().auto_replies.update_one({"id": int(reply_id)}, {"$set": {
+            "enabled": 1 if enabled else 0,
+            "updated_at": _now(),
+        }})
+
+    def get_menu_button_replies():
+        """Up to 3 enabled menu-button auto-replies."""
+        return _clean_many(
+            _db().auto_replies.find({"enabled": 1, "show_in_menu": 1})
+            .sort([("menu_order", ASCENDING), ("id", ASCENDING)])
+            .limit(3)
+        )
+
+    def find_auto_reply_by_text(text):
+        """Match button title (exact, case-insensitive) or keyword (substring)."""
+        if not text:
+            return None
+        needle = text.strip().lower()
+        if not needle:
+            return None
+        rows = _clean_many(
+            _db().auto_replies.find({"enabled": 1}).sort(
+                [("show_in_menu", DESCENDING), ("menu_order", ASCENDING), ("id", ASCENDING)]
+            )
+        )
+        for r in rows:
+            if (r.get("trigger_label") or "").strip().lower() == needle:
+                return r
+        for r in rows:
+            for kw in (r.get("keywords") or "").split(","):
+                kw = kw.strip().lower()
+                if kw and kw in needle:
+                    return r
+        return None
 
 
 if __name__ == "__main__":

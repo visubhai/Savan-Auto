@@ -260,6 +260,9 @@
     <a href="{{ url_for('templates_page') }}" class="nav-item {% if request.endpoint=='templates_page' %}active{% endif %}">
       <span class="nav-icon">📝</span> Templates
     </a>
+    <a href="{{ url_for('auto_replies') }}" class="nav-item {% if request.endpoint in ['auto_replies','auto_replies_create','auto_replies_edit'] %}active{% endif %}">
+      <span class="nav-icon">💬</span> Auto-Replies
+    </a>
     <a href="{{ url_for('settings') }}" class="nav-item {% if request.endpoint=='settings' %}active{% endif %}">
       <span class="nav-icon">⚙️</span> Settings
     </a>

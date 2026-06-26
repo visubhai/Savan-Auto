@@ -126,6 +126,52 @@ class WhatsAppAPI:
                 return False, str(e)
         return False, "Max retries exhausted"
 
+    def send_interactive_buttons(self, to_phone, body_text, buttons, footer_text=None):
+        """Send an interactive message with up to 3 quick-reply buttons.
+
+        `buttons` is a list of dicts: [{"id": "btn_5", "title": "Office Info"}, …].
+        WhatsApp caps the title at 20 characters and the list at 3 items —
+        we truncate/clip silently rather than fail the customer's session.
+
+        Only works within the 24-hour service window (i.e. after the
+        customer has sent us a message). Returns (ok, message_id_or_err).
+        """
+        clipped = []
+        for b in (buttons or [])[:3]:
+            title = (b.get("title") or "").strip()[:20] or "Option"
+            btn_id = str(b.get("id") or title)[:256]
+            clipped.append({"type": "reply", "reply": {"id": btn_id, "title": title}})
+        if not clipped:
+            return False, "no buttons provided"
+
+        interactive = {
+            "type": "button",
+            "body":   {"text": (body_text or "").strip()[:1024] or "Hi!"},
+            "action": {"buttons": clipped},
+        }
+        if footer_text:
+            interactive["footer"] = {"text": footer_text.strip()[:60]}
+
+        url = f"{self.base_url}/{self.phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to_phone,
+            "type": "interactive",
+            "interactive": interactive,
+        }
+        try:
+            r = requests.post(url, headers=self.headers, json=payload, timeout=15)
+            if r.status_code == 200:
+                msg_id = r.json().get("messages", [{}])[0].get("id", "unknown")
+                return True, msg_id
+            try:
+                err = r.json().get("error", {})
+                return False, f"[{err.get('code', r.status_code)}] {err.get('message', r.text[:200])}"
+            except Exception:
+                return False, f"HTTP {r.status_code}: {r.text[:200]}"
+        except Exception as e:
+            return False, str(e)
+
     def send_text(self, to_phone, text):
         """Send a free-form text message (only within 24-hour customer service window)."""
         url = f"{self.base_url}/{self.phone_number_id}/messages"

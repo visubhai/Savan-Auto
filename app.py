@@ -894,6 +894,101 @@ def change_password():
     return redirect(url_for("settings"))
 
 
+# ---------------- Auto-replies (customer-facing welcome menu + FAQ) ----------------
+
+@app.route("/auto-replies")
+@login_required
+def auto_replies():
+    rows = db.list_auto_replies()
+    enabled       = db.get_setting("auto_reply_enabled", "0") == "1"
+    welcome_body  = db.get_setting(
+        "welcome_menu_body",
+        "Welcome to Savan Travels 🚌\nHow can we help you today?",
+    )
+    welcome_footer = db.get_setting("welcome_menu_footer", "")
+    return render_template(
+        "auto_replies.html",
+        replies=rows,
+        enabled=enabled,
+        welcome_body=welcome_body,
+        welcome_footer=welcome_footer,
+    )
+
+
+@app.route("/auto-replies/save-settings", methods=["POST"])
+@login_required
+def auto_replies_save_settings():
+    db.set_setting("auto_reply_enabled",
+                   "1" if request.form.get("enabled") == "on" else "0")
+    db.set_setting("welcome_menu_body",   request.form.get("welcome_body", "").strip())
+    db.set_setting("welcome_menu_footer", request.form.get("welcome_footer", "").strip())
+    flash("✓ Auto-reply settings updated", "success")
+    return redirect(url_for("auto_replies"))
+
+
+@app.route("/auto-replies/create", methods=["POST"])
+@login_required
+def auto_replies_create():
+    label    = request.form.get("trigger_label", "").strip()
+    keywords = request.form.get("keywords", "").strip()
+    text     = request.form.get("response_text", "").strip()
+    in_menu  = request.form.get("show_in_menu") == "on"
+    order    = request.form.get("menu_order", "0").strip()
+    try:
+        order_int = int(order)
+    except ValueError:
+        order_int = 0
+    if not label or not text:
+        flash("Trigger label and response text are required", "error")
+        return redirect(url_for("auto_replies"))
+    if len(label) > 20:
+        flash("Trigger label must be 20 characters or fewer (WhatsApp button limit)", "error")
+        return redirect(url_for("auto_replies"))
+    db.create_auto_reply(label, keywords, text, in_menu, order_int)
+    flash(f"✓ Auto-reply '{label}' added", "success")
+    return redirect(url_for("auto_replies"))
+
+
+@app.route("/auto-replies/<int:reply_id>/edit", methods=["POST"])
+@login_required
+def auto_replies_edit(reply_id):
+    label    = request.form.get("trigger_label", "").strip()
+    keywords = request.form.get("keywords", "").strip()
+    text     = request.form.get("response_text", "").strip()
+    in_menu  = request.form.get("show_in_menu") == "on"
+    try:
+        order_int = int(request.form.get("menu_order", "0").strip())
+    except ValueError:
+        order_int = 0
+    if not label or not text:
+        flash("Trigger label and response text are required", "error")
+        return redirect(url_for("auto_replies"))
+    if len(label) > 20:
+        flash("Trigger label must be 20 characters or fewer (WhatsApp button limit)", "error")
+        return redirect(url_for("auto_replies"))
+    db.update_auto_reply(reply_id, label, keywords, text, in_menu, order_int)
+    flash("✓ Auto-reply updated", "success")
+    return redirect(url_for("auto_replies"))
+
+
+@app.route("/auto-replies/<int:reply_id>/toggle", methods=["POST"])
+@login_required
+def auto_replies_toggle(reply_id):
+    row = db.get_auto_reply(reply_id)
+    if not row:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    db.set_auto_reply_enabled(reply_id, not row["enabled"])
+    return jsonify({"ok": True, "enabled": not row["enabled"]})
+
+
+@app.route("/auto-replies/<int:reply_id>/delete", methods=["POST"])
+@login_required
+def auto_replies_delete(reply_id):
+    db.delete_auto_reply(reply_id)
+    flash("Auto-reply deleted", "success")
+    return redirect(url_for("auto_replies"))
+
+
 # ---------------- Team (users) ----------------
 @app.route("/users")
 @admin_required
@@ -1368,6 +1463,88 @@ def campaigns_extract():
 
 # ---------------- Webhook (incoming WhatsApp messages) ----------------
 
+def _dispatch_auto_reply(phone, msg, content):
+    """Decide what (if anything) to auto-send back to a customer who just
+    messaged us, then send it. Logged in the inbox like any outbound message.
+
+    Logic, in order:
+      1. Button/list reply → look up the FAQ text mapped to that button title
+      2. Free-form text matching a configured keyword → send that FAQ text
+      3. Anything else → send the welcome menu (up to 3 quick-reply buttons)
+
+    Loop prevention: our own outbound messages never trigger the customer's
+    webhook (Meta only emits 'messages' for inbound), so there's no echo
+    risk. We still no-op when there's nothing useful to send.
+    """
+    api = WhatsAppAPI()
+    if not api.is_configured():
+        return
+
+    msg_type = msg.get("type", "text")
+    selected_label = None
+
+    if msg_type == "interactive":
+        inter = msg.get("interactive", {}) or {}
+        if inter.get("type") == "button_reply":
+            selected_label = inter.get("button_reply", {}).get("title", "")
+        elif inter.get("type") == "list_reply":
+            selected_label = inter.get("list_reply", {}).get("title", "")
+    elif msg_type == "button":
+        selected_label = msg.get("button", {}).get("text", "")
+
+    reply_text = None
+    if selected_label:
+        # Button taps go straight to the configured response — no menu.
+        match = db.find_auto_reply_by_text(selected_label)
+        if match:
+            reply_text = match["response_text"]
+    elif msg_type == "text" and content:
+        match = db.find_auto_reply_by_text(content)
+        if match:
+            reply_text = match["response_text"]
+
+    if reply_text:
+        ok, result = api.send_text(phone, reply_text)
+        if ok:
+            db.save_chat_message(
+                phone, None, "out", reply_text,
+                wa_message_id=result, message_type="text",
+            )
+        else:
+            app.logger.error(f"Auto-reply text send failed to {phone}: {result}")
+        return
+
+    # No keyword/button match → send the welcome menu (if any buttons configured).
+    if selected_label or msg_type not in ("text",):
+        # Don't re-prompt with the menu in response to a button tap that
+        # didn't resolve (would loop the customer back to the same menu)
+        # or in response to non-text events like reactions/statuses.
+        return
+
+    buttons = db.get_menu_button_replies()
+    if not buttons:
+        return
+
+    body_text = db.get_setting(
+        "welcome_menu_body",
+        "Welcome to Savan Travels 🚌\nHow can we help you today?",
+    )
+    footer = db.get_setting("welcome_menu_footer", "") or None
+
+    btn_payload = [
+        {"id": f"ar_{b['id']}", "title": b["trigger_label"]} for b in buttons
+    ]
+    ok, result = api.send_interactive_buttons(phone, body_text, btn_payload, footer)
+    if ok:
+        preview = body_text + "\n[" + " | ".join(b["trigger_label"] for b in buttons) + "]"
+        db.save_chat_message(
+            phone, None, "out", preview,
+            wa_message_id=result, message_type="interactive",
+        )
+    else:
+        app.logger.error(f"Welcome-menu send failed to {phone}: {result}")
+
+
 @app.route("/webhook", methods=["GET"])
 def webhook_verify():
     """Meta webhook verification handshake."""
@@ -1491,6 +1668,20 @@ def webhook_receive():
                         storage_kind=storage_kind,
                         raw_payload=raw_payload,
                     )
+
+                    # ── Auto-reply (if enabled in settings) ────────────────
+                    # Behavior:
+                    #   • inbound is a button/list reply → send the FAQ text
+                    #     mapped to that label
+                    #   • inbound is text matching a configured keyword → send
+                    #     that FAQ text
+                    #   • otherwise → send the welcome menu with up to 3
+                    #     quick-reply buttons
+                    if db.get_setting("auto_reply_enabled", "0") == "1":
+                        try:
+                            _dispatch_auto_reply(phone, msg, content)
+                        except Exception as e:
+                            app.logger.error(f"Auto-reply dispatch failed: {e}")
 
                 # ── Status updates (sent → delivered → read) ───────────────
                 for st in value.get("statuses", []):
@@ -1686,6 +1877,18 @@ def inbox_poll():
 @login_required
 def inbox_unread():
     return jsonify({"count": db.get_unread_count()})
+
+
+@app.route("/api/inbox/<phone>/delete", methods=["POST"])
+@login_required
+def inbox_delete_conversation(phone):
+    """Hard-delete every chat message with this number. Cannot be undone."""
+    from parsers import clean_phone as _cp
+    phone = _cp(phone or "")
+    if not phone:
+        return jsonify({"ok": False, "error": "invalid phone"}), 400
+    removed = db.delete_conversation(phone)
+    return jsonify({"ok": True, "removed": removed})
 
 
 # Meta's current actual tier ladder (visible in Business Manager UI).

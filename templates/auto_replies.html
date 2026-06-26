@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Auto-Replies{% endblock %}
+{% block page_title %}Auto-Replies & Welcome Menu{% endblock %}
+
+{% block content %}
+<style>
+  .ar-grid { display:grid; grid-template-columns:1fr 380px; gap:20px; align-items:start; }
+  .ar-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; margin-bottom:12px; }
+  .ar-card.editing { border-color:var(--amber); }
+  .ar-card.disabled { opacity:0.55; }
+  .ar-label { font-family:'Bricolage Grotesque',sans-serif; font-size:15px; font-weight:700; color:#0f172a; }
+  .ar-meta  { font-size:11.5px; color:#94a3b8; margin-top:2px; }
+  .ar-resp  { font-size:13px; color:#475569; white-space:pre-wrap; background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-top:8px; line-height:1.55; }
+  .ar-pill  { display:inline-block; font-size:11px; padding:2px 9px; border-radius:99px; font-weight:600; margin-left:6px; }
+  .pill-menu  { background:var(--primary-dim); color:var(--primary-dark); }
+  .pill-on    { background:#d1fae5; color:#047857; }
+  .pill-off   { background:#fee2e2; color:#991b1b; }
+  .pill-order { background:#f1f5f9; color:#475569; }
+  .right-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px; position:sticky; top:20px; }
+  .toggle-switch { position:relative; display:inline-block; width:42px; height:22px; }
+  .toggle-switch input { opacity:0; width:0; height:0; }
+  .toggle-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#cbd5e1; transition:.2s; border-radius:99px; }
+  .toggle-slider:before { position:absolute; content:""; height:16px; width:16px; left:3px; top:3px; background:#fff; transition:.2s; border-radius:50%; }
+  input:checked + .toggle-slider { background:var(--success, #10b981); }
+  input:checked + .toggle-slider:before { transform:translateX(20px); }
+  .menu-preview { background:#dcf8c6; border:1px solid #b8e2a1; border-radius:10px; padding:12px; margin-top:12px; font-size:13px; color:#1c3625; white-space:pre-wrap; }
+  .menu-btn-preview { display:inline-block; background:#fff; border:1px solid #b8e2a1; border-radius:6px; padding:5px 12px; margin:4px 4px 0 0; font-size:12px; color:#075e54; font-weight:600; }
+  .help { font-size:11.5px; color:#94a3b8; margin-top:-4px; margin-bottom:10px; line-height:1.5; }
+</style>
+
+<div class="ar-grid">
+
+  <!-- ─── LEFT: master switch + welcome-menu config + list of replies ─── -->
+  <div>
+    <!-- Master switch + welcome menu copy -->
+    <div class="ar-card" style="border-color:{% if enabled %}var(--success, #10b981){% else %}var(--border){% endif %};">
+      <form method="POST" action="{{ url_for('auto_replies_save_settings') }}">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+          <label class="toggle-switch" title="Master switch — turn auto-replies on/off">
+            <input type="checkbox" name="enabled" {% if enabled %}checked{% endif %}>
+            <span class="toggle-slider"></span>
+          </label>
+          <div style="flex:1;">
+            <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:16px;font-weight:700;">
+              Auto-replies are
+              <span style="color:{% if enabled %}var(--success, #10b981){% else %}#94a3b8{% endif %};">
+                {% if enabled %}ON{% else %}OFF{% endif %}
+              </span>
+            </div>
+            <div style="font-size:12px;color:#94a3b8;">
+              When ON, every customer message triggers the welcome menu (or a matching FAQ reply).
+            </div>
+          </div>
+        </div>
+
+        <label class="input-label">Welcome message body</label>
+        <textarea name="welcome_body" rows="3" class="input" style="margin-bottom:6px;font-family:inherit;resize:vertical;">{{ welcome_body }}</textarea>
+        <div class="help">Shown above the menu buttons. Customer sees this every time they message you (no template approval needed — WhatsApp allows free-form text in the 24-hour customer service window).</div>
+
+        <label class="input-label">Footer (optional)</label>
+        <input type="text" name="welcome_footer" class="input" maxlength="60" value="{{ welcome_footer or '' }}" placeholder="e.g. Hours: 9 AM – 9 PM">
+        <div class="help">Max 60 characters. Use for hours, address, or a tagline.</div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top:4px;">💾 Save Settings</button>
+      </form>
+
+      {% if enabled %}
+      <div class="menu-preview" style="margin-top:14px;">
+        <div style="font-size:11px;color:#5d8061;font-weight:600;margin-bottom:6px;">PREVIEW — what your customer sees:</div>
+        {{ welcome_body }}
+        <div style="margin-top:8px;">
+          {% set menu_btns = replies | selectattr('show_in_menu', 'equalto', 1) | selectattr('enabled', 'equalto', 1) | list %}
+          {% if menu_btns %}
+            {% for b in menu_btns[:3] %}
+              <span class="menu-btn-preview">{{ b.trigger_label }}</span>
+            {% endfor %}
+          {% else %}
+            <span style="font-size:11.5px;color:#7a8c7e;font-style:italic;">No menu buttons configured yet — add some on the right →</span>
+          {% endif %}
+        </div>
+        {% if welcome_footer %}<div style="font-size:11px;color:#5d8061;margin-top:8px;">{{ welcome_footer }}</div>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- List of configured auto-replies -->
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:18px;font-weight:700;margin:18px 0 12px 0;">
+      Configured Replies
+      <span style="font-size:13px;color:#94a3b8;font-weight:500;">({{ replies|length }})</span>
+    </div>
+
+    {% if replies %}
+      {% for r in replies %}
+      <div class="ar-card {% if not r.enabled %}disabled{% endif %}" id="ar-{{ r.id }}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+          <div style="flex:1;min-width:0;">
+            <div>
+              <span class="ar-label">{{ r.trigger_label }}</span>
+              {% if r.show_in_menu %}<span class="ar-pill pill-menu">📌 menu #{{ r.menu_order }}</span>{% endif %}
+              {% if r.enabled %}<span class="ar-pill pill-on">ON</span>{% else %}<span class="ar-pill pill-off">OFF</span>{% endif %}
+            </div>
+            {% if r.keywords %}
+            <div class="ar-meta">Keywords: <code style="font-family:monospace;color:#475569;">{{ r.keywords }}</code></div>
+            {% endif %}
+            <div class="ar-resp">{{ r.response_text }}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;min-width:96px;">
+            <button type="button" class="btn btn-ghost btn-sm ar-toggle" data-id="{{ r.id }}">
+              {% if r.enabled %}⏸ Disable{% else %}▶ Enable{% endif %}
+            </button>
+            <button type="button" class="btn btn-ghost btn-sm ar-edit"
+              data-id="{{ r.id }}"
+              data-label="{{ r.trigger_label }}"
+              data-keywords="{{ r.keywords }}"
+              data-text="{{ r.response_text }}"
+              data-menu="{{ r.show_in_menu }}"
+              data-order="{{ r.menu_order }}">✏ Edit</button>
+            <form method="POST" action="{{ url_for('auto_replies_delete', reply_id=r.id) }}"
+                  onsubmit="return confirm('Delete this auto-reply?');" style="margin:0;">
+              <button type="submit" class="btn btn-ghost btn-sm" style="color:#ef4444;width:100%;">🗑 Delete</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="ar-card" style="text-align:center;padding:32px 16px;color:#94a3b8;">
+        <div style="font-size:36px;margin-bottom:8px;">💬</div>
+        <div style="font-size:14px;">No auto-replies yet — add your first one on the right →</div>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- ─── RIGHT: create / edit form ─── -->
+  <div>
+    <div class="right-card">
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:4px;" id="formTitle">✨ New Auto-Reply</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:16px;" id="formSub">e.g. "Office Info" → office address + phone</div>
+
+      <form method="POST" id="arForm" action="{{ url_for('auto_replies_create') }}">
+
+        <label class="input-label">Trigger label *</label>
+        <input type="text" name="trigger_label" id="arLabel" class="input" maxlength="20" required placeholder="e.g. Office Info" style="margin-bottom:6px;">
+        <div class="help">Max 20 chars. Shown as the button title in the welcome menu, AND used as the exact-match trigger when the customer types it.</div>
+
+        <label class="input-label">Keywords (comma-separated)</label>
+        <input type="text" name="keywords" id="arKeywords" class="input" placeholder="office, phone, number, address" style="margin-bottom:6px;">
+        <div class="help">Optional. If the customer's message contains any of these words (case-insensitive substring), this reply is sent. Leave blank if the only trigger is the button tap.</div>
+
+        <label class="input-label">Response text *</label>
+        <textarea name="response_text" id="arText" rows="4" class="input" required style="font-family:inherit;resize:vertical;margin-bottom:6px;" placeholder="Our office: …\nPhone: +91…\nHours: 9 AM – 9 PM"></textarea>
+        <div class="help">Free-form text. Customer service window must be active (they messaged you within 24h — which they just did, since this is an auto-reply).</div>
+
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px;">
+          <label class="toggle-switch">
+            <input type="checkbox" name="show_in_menu" id="arInMenu">
+            <span class="toggle-slider"></span>
+          </label>
+          <label for="arInMenu" style="font-size:13px;cursor:pointer;">Show as button in welcome menu</label>
+        </div>
+        <div class="help">WhatsApp allows max 3 buttons. If you turn this on for a 4th reply, the first 3 (by order) still appear.</div>
+
+        <label class="input-label">Menu position</label>
+        <input type="number" name="menu_order" id="arOrder" class="input" value="0" min="0" max="9" style="margin-bottom:14px;">
+        <div class="help" style="margin-top:-6px;">0 = leftmost. Used only when "show in menu" is on.</div>
+
+        <div style="display:flex;gap:10px;">
+          <button type="submit" class="btn btn-primary" style="flex:1;" id="arSubmit">💾 Add Reply</button>
+          <button type="button" class="btn btn-ghost" id="arCancel" style="display:none;" onclick="resetArForm()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function resetArForm() {
+  var form = document.getElementById('arForm');
+  form.action = {{ url_for('auto_replies_create')|tojson }};
+  document.getElementById('arLabel').value    = '';
+  document.getElementById('arKeywords').value = '';
+  document.getElementById('arText').value     = '';
+  document.getElementById('arInMenu').checked = false;
+  document.getElementById('arOrder').value    = 0;
+  document.getElementById('formTitle').textContent = '✨ New Auto-Reply';
+  document.getElementById('formSub').textContent   = 'e.g. "Office Info" → office address + phone';
+  document.getElementById('arSubmit').textContent  = '💾 Add Reply';
+  document.getElementById('arCancel').style.display = 'none';
+  document.querySelectorAll('.ar-card').forEach(function(c){ c.classList.remove('editing'); });
+}
+
+document.addEventListener('click', function(e) {
+  /* Edit ---------------------------------------------------------------- */
+  var ed = e.target.closest('.ar-edit');
+  if (ed) {
+    var id = ed.dataset.id;
+    var form = document.getElementById('arForm');
+    form.action = '/auto-replies/' + id + '/edit';
+    document.getElementById('arLabel').value    = ed.dataset.label    || '';
+    document.getElementById('arKeywords').value = ed.dataset.keywords || '';
+    document.getElementById('arText').value     = ed.dataset.text     || '';
+    document.getElementById('arInMenu').checked = ed.dataset.menu === '1';
+    document.getElementById('arOrder').value    = ed.dataset.order    || 0;
+    document.getElementById('formTitle').textContent = '✏ Edit Auto-Reply';
+    document.getElementById('formSub').textContent   = 'Editing: ' + (ed.dataset.label || '');
+    document.getElementById('arSubmit').textContent  = '💾 Update Reply';
+    document.getElementById('arCancel').style.display = '';
+    document.querySelectorAll('.ar-card').forEach(function(c){ c.classList.remove('editing'); });
+    var card = document.getElementById('ar-' + id);
+    if (card) { card.classList.add('editing'); card.scrollIntoView({behavior:'smooth', block:'nearest'}); }
+    document.querySelector('.right-card').scrollIntoView({behavior:'smooth', block:'start'});
+    return;
+  }
+
+  /* Toggle enabled/disabled --------------------------------------------- */
+  var tg = e.target.closest('.ar-toggle');
+  if (tg) {
+    var id = tg.dataset.id;
+    tg.disabled = true;
+    fetch('/auto-replies/' + id + '/toggle', { method: 'POST' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (d.ok) location.reload(); else { tg.disabled = false; alert(d.error || 'Toggle failed'); } })
+      .catch(function(err){ tg.disabled = false; alert(err.message); });
+  }
+});
+</script>
+{% endblock %}
