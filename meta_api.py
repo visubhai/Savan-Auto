@@ -172,6 +172,70 @@ class WhatsAppAPI:
         except Exception as e:
             return False, str(e)
 
+    def send_interactive_list(self, to_phone, body_text, rows,
+                               button_label="Choose an option",
+                               section_title="Options",
+                               footer_text=None, header_text=None):
+        """Send an interactive list message — modal with up to 10 tappable rows.
+
+        `rows` is a list of dicts: [{"id":..., "title":..., "description":...}, …]
+        Use this when you have 4-10 menu options. For 1-3, prefer
+        send_interactive_buttons (snappier single-tap UX).
+
+        WhatsApp limits we silently enforce:
+          • max 10 rows total
+          • row title ≤ 24 chars, description ≤ 72
+          • body ≤ 4096, footer ≤ 60, header ≤ 60
+          • button label ≤ 20 (required)
+        """
+        clipped = []
+        for r in (rows or [])[:10]:
+            title = (r.get("title") or "").strip()[:24] or "Option"
+            row_id = str(r.get("id") or title)[:200]
+            entry = {"id": row_id, "title": title}
+            desc = (r.get("description") or "").strip()
+            if desc:
+                entry["description"] = desc[:72]
+            clipped.append(entry)
+        if not clipped:
+            return False, "no rows provided"
+
+        interactive = {
+            "type": "list",
+            "body": {"text": (body_text or "").strip()[:4096] or "Hi!"},
+            "action": {
+                "button": (button_label or "Choose").strip()[:20] or "Choose",
+                "sections": [{
+                    "title": (section_title or "Options").strip()[:24],
+                    "rows": clipped,
+                }],
+            },
+        }
+        if header_text:
+            interactive["header"] = {"type": "text", "text": header_text.strip()[:60]}
+        if footer_text:
+            interactive["footer"] = {"text": footer_text.strip()[:60]}
+
+        url = f"{self.base_url}/{self.phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": to_phone,
+            "type": "interactive",
+            "interactive": interactive,
+        }
+        try:
+            r = requests.post(url, headers=self.headers, json=payload, timeout=15)
+            if r.status_code == 200:
+                msg_id = r.json().get("messages", [{}])[0].get("id", "unknown")
+                return True, msg_id
+            try:
+                err = r.json().get("error", {})
+                return False, f"[{err.get('code', r.status_code)}] {err.get('message', r.text[:200])}"
+            except Exception:
+                return False, f"HTTP {r.status_code}: {r.text[:200]}"
+        except Exception as e:
+            return False, str(e)
+
     def send_text(self, to_phone, text):
         """Send a free-form text message (only within 24-hour customer service window)."""
         url = f"{self.base_url}/{self.phone_number_id}/messages"

@@ -61,21 +61,51 @@
         <input type="text" name="welcome_footer" class="input" maxlength="60" value="{{ welcome_footer or '' }}" placeholder="e.g. Hours: 9 AM – 9 PM">
         <div class="help">Max 60 characters. Use for hours, address, or a tagline.</div>
 
+        <label class="input-label">List button label <span style="color:#94a3b8;font-weight:400;">(used when 4+ menu items)</span></label>
+        <input type="text" name="list_button_label" class="input" maxlength="20" value="{{ list_button_label or 'Choose an option' }}" placeholder="Choose an option">
+        <div class="help">Max 20 characters. Only used when you mark 4–10 replies as "show in menu" — they render as a tappable list instead of buttons.</div>
+
         <button type="submit" class="btn btn-primary" style="margin-top:4px;">💾 Save Settings</button>
       </form>
 
       {% if enabled %}
+      {% set menu_btns = replies | selectattr('show_in_menu', 'equalto', 1) | selectattr('enabled', 'equalto', 1) | list %}
       <div class="menu-preview" style="margin-top:14px;">
-        <div style="font-size:11px;color:#5d8061;font-weight:600;margin-bottom:6px;">PREVIEW — what your customer sees:</div>
+        <div style="font-size:11px;color:#5d8061;font-weight:600;margin-bottom:6px;">
+          PREVIEW — what your customer sees
+          {% if menu_btns|length == 0 %}
+            <span style="font-weight:500;font-style:italic;">(no menu items yet)</span>
+          {% elif menu_btns|length <= 3 %}
+            <span style="background:#fff;border:1px solid #b8e2a1;color:#075e54;border-radius:4px;padding:1px 6px;font-weight:500;margin-left:4px;">BUTTONS MODE</span>
+          {% else %}
+            <span style="background:#fff;border:1px solid #b8e2a1;color:#075e54;border-radius:4px;padding:1px 6px;font-weight:500;margin-left:4px;">LIST MODE ({{ menu_btns|length }} items)</span>
+          {% endif %}
+        </div>
         {{ welcome_body }}
         <div style="margin-top:8px;">
-          {% set menu_btns = replies | selectattr('show_in_menu', 'equalto', 1) | selectattr('enabled', 'equalto', 1) | list %}
-          {% if menu_btns %}
+          {% if menu_btns|length == 0 %}
+            <span style="font-size:11.5px;color:#7a8c7e;font-style:italic;">Add menu items on the right →</span>
+          {% elif menu_btns|length <= 3 %}
+            {# Buttons preview — like the current behavior #}
             {% for b in menu_btns[:3] %}
               <span class="menu-btn-preview">{{ b.trigger_label }}</span>
             {% endfor %}
           {% else %}
-            <span style="font-size:11.5px;color:#7a8c7e;font-style:italic;">No menu buttons configured yet — add some on the right →</span>
+            {# List preview — a CTA button that opens the modal #}
+            <span class="menu-btn-preview" style="background:#075e54;color:#fff;border-color:#075e54;">▤ {{ list_button_label or 'Choose an option' }}</span>
+            <div style="background:#fff;border:1px solid #b8e2a1;border-radius:8px;margin-top:8px;padding:4px 0;max-height:240px;overflow-y:auto;">
+              {% for b in menu_btns[:10] %}
+              <div style="padding:8px 12px;{% if not loop.last %}border-bottom:1px solid #ecfdf5;{% endif %}">
+                <div style="font-size:12.5px;font-weight:600;color:#075e54;">{{ b.trigger_label }}</div>
+                {% if b.description %}<div style="font-size:11px;color:#5d8061;margin-top:2px;">{{ b.description }}</div>{% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% if menu_btns|length > 10 %}
+            <div style="font-size:11px;color:#7a8c7e;margin-top:4px;font-style:italic;">
+              ↑ Only the first 10 are shown — WhatsApp caps list messages at 10 rows.
+            </div>
+            {% endif %}
           {% endif %}
         </div>
         {% if welcome_footer %}<div style="font-size:11px;color:#5d8061;margin-top:8px;">{{ welcome_footer }}</div>{% endif %}
@@ -102,6 +132,9 @@
             {% if r.keywords %}
             <div class="ar-meta">Keywords: <code style="font-family:monospace;color:#475569;">{{ r.keywords }}</code></div>
             {% endif %}
+            {% if r.description %}
+            <div class="ar-meta" style="font-style:italic;">↳ {{ r.description }}</div>
+            {% endif %}
             <div class="ar-resp">{{ r.response_text }}</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;min-width:96px;">
@@ -113,6 +146,7 @@
               data-label="{{ r.trigger_label }}"
               data-keywords="{{ r.keywords }}"
               data-text="{{ r.response_text }}"
+              data-desc="{{ r.description or '' }}"
               data-menu="{{ r.show_in_menu }}"
               data-order="{{ r.menu_order }}">✏ Edit</button>
             <form method="POST" action="{{ url_for('auto_replies_delete', reply_id=r.id) }}"
@@ -151,6 +185,10 @@
         <textarea name="response_text" id="arText" rows="4" class="input" required style="font-family:inherit;resize:vertical;margin-bottom:6px;" placeholder="Our office: …\nPhone: +91…\nHours: 9 AM – 9 PM"></textarea>
         <div class="help">Free-form text. Customer service window must be active (they messaged you within 24h — which they just did, since this is an auto-reply).</div>
 
+        <label class="input-label">Description <span style="color:#94a3b8;font-weight:400;">(shown under row in list mode)</span></label>
+        <input type="text" name="description" id="arDesc" class="input" maxlength="72" placeholder="e.g. Send / track / inquire about parcels" style="margin-bottom:6px;">
+        <div class="help">Max 72 chars. Only visible when the welcome menu has 4+ items (list mode). Ignored in button mode.</div>
+
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px;">
           <label class="toggle-switch">
             <input type="checkbox" name="show_in_menu" id="arInMenu">
@@ -183,6 +221,7 @@ function resetArForm() {
   document.getElementById('arLabel').value    = '';
   document.getElementById('arKeywords').value = '';
   document.getElementById('arText').value     = '';
+  document.getElementById('arDesc').value     = '';
   document.getElementById('arInMenu').checked = false;
   document.getElementById('arOrder').value    = 0;
   document.getElementById('formTitle').textContent = '✨ New Auto-Reply';
@@ -202,6 +241,7 @@ document.addEventListener('click', function(e) {
     document.getElementById('arLabel').value    = ed.dataset.label    || '';
     document.getElementById('arKeywords').value = ed.dataset.keywords || '';
     document.getElementById('arText').value     = ed.dataset.text     || '';
+    document.getElementById('arDesc').value     = ed.dataset.desc     || '';
     document.getElementById('arInMenu').checked = ed.dataset.menu === '1';
     document.getElementById('arOrder').value    = ed.dataset.order    || 0;
     document.getElementById('formTitle').textContent = '✏ Edit Auto-Reply';

@@ -905,13 +905,15 @@ def auto_replies():
         "welcome_menu_body",
         "Welcome to Savan Travels 🚌\nHow can we help you today?",
     )
-    welcome_footer = db.get_setting("welcome_menu_footer", "")
+    welcome_footer    = db.get_setting("welcome_menu_footer", "")
+    list_button_label = db.get_setting("welcome_list_button_label", "Choose an option")
     return render_template(
         "auto_replies.html",
         replies=rows,
         enabled=enabled,
         welcome_body=welcome_body,
         welcome_footer=welcome_footer,
+        list_button_label=list_button_label,
     )
 
 
@@ -920,31 +922,51 @@ def auto_replies():
 def auto_replies_save_settings():
     db.set_setting("auto_reply_enabled",
                    "1" if request.form.get("enabled") == "on" else "0")
-    db.set_setting("welcome_menu_body",   request.form.get("welcome_body", "").strip())
-    db.set_setting("welcome_menu_footer", request.form.get("welcome_footer", "").strip())
+    db.set_setting("welcome_menu_body",        request.form.get("welcome_body", "").strip())
+    db.set_setting("welcome_menu_footer",      request.form.get("welcome_footer", "").strip())
+    # Only used when the menu has 4+ items (renders as a list message).
+    db.set_setting("welcome_list_button_label",
+                   (request.form.get("list_button_label", "").strip() or "Choose an option"))
     flash("✓ Auto-reply settings updated", "success")
     return redirect(url_for("auto_replies"))
+
+
+def _parse_reply_form(form):
+    """Pull the fields shared by create + edit auto-reply routes."""
+    label    = form.get("trigger_label", "").strip()
+    keywords = form.get("keywords", "").strip()
+    text     = form.get("response_text", "").strip()
+    desc     = form.get("description", "").strip()
+    in_menu  = form.get("show_in_menu") == "on"
+    try:
+        order_int = int(form.get("menu_order", "0").strip() or "0")
+    except ValueError:
+        order_int = 0
+    return label, keywords, text, desc, in_menu, order_int
+
+
+def _validate_reply_fields(label, text, desc):
+    """Return an error string if invalid, else None."""
+    if not label or not text:
+        return "Trigger label and response text are required"
+    # 20 chars covers WhatsApp's button-title limit; 24 covers list-row titles.
+    # We cap at the tighter button limit so the same label works in both modes.
+    if len(label) > 20:
+        return "Trigger label must be 20 characters or fewer (WhatsApp button limit)"
+    if desc and len(desc) > 72:
+        return "Description must be 72 characters or fewer (WhatsApp list row limit)"
+    return None
 
 
 @app.route("/auto-replies/create", methods=["POST"])
 @login_required
 def auto_replies_create():
-    label    = request.form.get("trigger_label", "").strip()
-    keywords = request.form.get("keywords", "").strip()
-    text     = request.form.get("response_text", "").strip()
-    in_menu  = request.form.get("show_in_menu") == "on"
-    order    = request.form.get("menu_order", "0").strip()
-    try:
-        order_int = int(order)
-    except ValueError:
-        order_int = 0
-    if not label or not text:
-        flash("Trigger label and response text are required", "error")
+    label, keywords, text, desc, in_menu, order_int = _parse_reply_form(request.form)
+    err = _validate_reply_fields(label, text, desc)
+    if err:
+        flash(err, "error")
         return redirect(url_for("auto_replies"))
-    if len(label) > 20:
-        flash("Trigger label must be 20 characters or fewer (WhatsApp button limit)", "error")
-        return redirect(url_for("auto_replies"))
-    db.create_auto_reply(label, keywords, text, in_menu, order_int)
+    db.create_auto_reply(label, keywords, text, in_menu, order_int, description=desc)
     flash(f"✓ Auto-reply '{label}' added", "success")
     return redirect(url_for("auto_replies"))
 
@@ -952,21 +974,12 @@ def auto_replies_create():
 @app.route("/auto-replies/<int:reply_id>/edit", methods=["POST"])
 @login_required
 def auto_replies_edit(reply_id):
-    label    = request.form.get("trigger_label", "").strip()
-    keywords = request.form.get("keywords", "").strip()
-    text     = request.form.get("response_text", "").strip()
-    in_menu  = request.form.get("show_in_menu") == "on"
-    try:
-        order_int = int(request.form.get("menu_order", "0").strip())
-    except ValueError:
-        order_int = 0
-    if not label or not text:
-        flash("Trigger label and response text are required", "error")
+    label, keywords, text, desc, in_menu, order_int = _parse_reply_form(request.form)
+    err = _validate_reply_fields(label, text, desc)
+    if err:
+        flash(err, "error")
         return redirect(url_for("auto_replies"))
-    if len(label) > 20:
-        flash("Trigger label must be 20 characters or fewer (WhatsApp button limit)", "error")
-        return redirect(url_for("auto_replies"))
-    db.update_auto_reply(reply_id, label, keywords, text, in_menu, order_int)
+    db.update_auto_reply(reply_id, label, keywords, text, in_menu, order_int, description=desc)
     flash("✓ Auto-reply updated", "success")
     return redirect(url_for("auto_replies"))
 
@@ -1521,8 +1534,8 @@ def _dispatch_auto_reply(phone, msg, content):
         # or in response to non-text events like reactions/statuses.
         return
 
-    buttons = db.get_menu_button_replies()
-    if not buttons:
+    menu = db.get_menu_button_replies()
+    if not menu:
         return
 
     body_text = db.get_setting(
@@ -1531,12 +1544,30 @@ def _dispatch_auto_reply(phone, msg, content):
     )
     footer = db.get_setting("welcome_menu_footer", "") or None
 
-    btn_payload = [
-        {"id": f"ar_{b['id']}", "title": b["trigger_label"]} for b in buttons
-    ]
-    ok, result = api.send_interactive_buttons(phone, body_text, btn_payload, footer)
+    # 1-3 menu items → buttons (single-tap UX).
+    # 4-10 menu items → list message (modal with a CTA button, two-tap UX).
+    if len(menu) <= 3:
+        btn_payload = [
+            {"id": f"ar_{b['id']}", "title": b["trigger_label"]} for b in menu
+        ]
+        ok, result = api.send_interactive_buttons(phone, body_text, btn_payload, footer)
+        preview_tail = "[" + " | ".join(b["trigger_label"] for b in menu) + "]"
+    else:
+        rows = [
+            {"id": f"ar_{b['id']}",
+             "title": b["trigger_label"],
+             "description": b.get("description") or ""}
+            for b in menu
+        ]
+        button_label = db.get_setting("welcome_list_button_label", "Choose an option")
+        ok, result = api.send_interactive_list(
+            phone, body_text, rows,
+            button_label=button_label, footer_text=footer,
+        )
+        preview_tail = "[List: " + " · ".join(b["trigger_label"] for b in menu) + "]"
+
     if ok:
-        preview = body_text + "\n[" + " | ".join(b["trigger_label"] for b in buttons) + "]"
+        preview = body_text + "\n" + preview_tail
         db.save_chat_message(
             phone, None, "out", preview,
             wa_message_id=result, message_type="interactive",

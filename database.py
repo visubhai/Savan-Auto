@@ -761,7 +761,8 @@ else:
     # See database_sqlite.py for the field-by-field meaning. Mongo schema
     # mirrors the SQLite row exactly so the calling code is identical.
 
-    def create_auto_reply(label, keywords, response_text, show_in_menu=False, menu_order=0):
+    def create_auto_reply(label, keywords, response_text, show_in_menu=False,
+                           menu_order=0, description=""):
         new_id = _next_id("auto_replies")
         _db().auto_replies.insert_one({
             "id":            new_id,
@@ -769,6 +770,7 @@ else:
             "trigger_label": (label or "").strip(),
             "keywords":      (keywords or "").strip(),
             "response_text": response_text,
+            "description":   (description or "").strip(),
             "show_in_menu":  1 if show_in_menu else 0,
             "menu_order":    int(menu_order or 0),
             "created_at":    _now(),
@@ -786,11 +788,13 @@ else:
     def get_auto_reply(reply_id):
         return _clean(_db().auto_replies.find_one({"id": int(reply_id)}))
 
-    def update_auto_reply(reply_id, label, keywords, response_text, show_in_menu, menu_order):
+    def update_auto_reply(reply_id, label, keywords, response_text, show_in_menu,
+                           menu_order, description=""):
         _db().auto_replies.update_one({"id": int(reply_id)}, {"$set": {
             "trigger_label": (label or "").strip(),
             "keywords":      (keywords or "").strip(),
             "response_text": response_text,
+            "description":   (description or "").strip(),
             "show_in_menu":  1 if show_in_menu else 0,
             "menu_order":    int(menu_order or 0),
             "updated_at":    _now(),
@@ -806,11 +810,12 @@ else:
         }})
 
     def get_menu_button_replies():
-        """Up to 3 enabled menu-button auto-replies."""
+        """Up to 10 enabled menu auto-replies. The dispatcher renders them as
+        buttons (1-3 items) or a list message (4-10 items)."""
         return _clean_many(
             _db().auto_replies.find({"enabled": 1, "show_in_menu": 1})
             .sort([("menu_order", ASCENDING), ("id", ASCENDING)])
-            .limit(3)
+            .limit(10)
         )
 
     def find_auto_reply_by_text(text):

@@ -171,6 +171,7 @@ def init_db():
             trigger_label TEXT NOT NULL,
             keywords TEXT NOT NULL DEFAULT '',
             response_text TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
             show_in_menu INTEGER NOT NULL DEFAULT 0,
             menu_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
@@ -226,6 +227,13 @@ def init_db():
                 db.execute(f"ALTER TABLE campaigns ADD COLUMN {col} TEXT")
         if "header_image_size" not in cols:
             db.execute("ALTER TABLE campaigns ADD COLUMN header_image_size INTEGER")
+
+    # Migration: add description column to auto_replies (shown under each row
+    # in WhatsApp list messages — 4-10 menu items render as a list, not buttons).
+    with get_db() as db:
+        cols = {r["name"] for r in db.execute("PRAGMA table_info(auto_replies)").fetchall()}
+        if "description" not in cols:
+            db.execute("ALTER TABLE auto_replies ADD COLUMN description TEXT NOT NULL DEFAULT ''")
 
     # Seed default admin if no users exist
     with get_db() as db:
@@ -930,13 +938,15 @@ def delete_user(user_id):
 #   response_text : what we send back to the customer
 #   show_in_menu  : when True (and rank within top 3), appears as a tap-button
 #                   in the welcome menu we send on each inbound message
-def create_auto_reply(label, keywords, response_text, show_in_menu=False, menu_order=0):
+def create_auto_reply(label, keywords, response_text, show_in_menu=False,
+                       menu_order=0, description=""):
     with get_db() as db:
         cur = db.execute(
             """INSERT INTO auto_replies (trigger_label, keywords, response_text,
-                                          show_in_menu, menu_order)
-               VALUES (?, ?, ?, ?, ?)""",
+                                          description, show_in_menu, menu_order)
+               VALUES (?, ?, ?, ?, ?, ?)""",
             (label.strip(), (keywords or "").strip(), response_text,
+             (description or "").strip(),
              1 if show_in_menu else 0, int(menu_order or 0)),
         )
         return cur.lastrowid
@@ -956,18 +966,21 @@ def get_auto_reply(reply_id):
         return dict(row) if row else None
 
 
-def update_auto_reply(reply_id, label, keywords, response_text, show_in_menu, menu_order):
+def update_auto_reply(reply_id, label, keywords, response_text, show_in_menu,
+                       menu_order, description=""):
     with get_db() as db:
         db.execute(
             """UPDATE auto_replies
                   SET trigger_label = ?,
                       keywords      = ?,
                       response_text = ?,
+                      description   = ?,
                       show_in_menu  = ?,
                       menu_order    = ?,
                       updated_at    = datetime('now', '+330 minutes')
                 WHERE id = ?""",
             (label.strip(), (keywords or "").strip(), response_text,
+             (description or "").strip(),
              1 if show_in_menu else 0, int(menu_order or 0), int(reply_id)),
         )
 
@@ -986,14 +999,18 @@ def set_auto_reply_enabled(reply_id, enabled):
 
 
 def get_menu_button_replies():
-    """Return up to 3 enabled auto-replies flagged for the welcome menu.
-    WhatsApp interactive button messages allow at most 3 buttons."""
+    """Return up to 10 enabled auto-replies flagged for the welcome menu.
+
+    The dispatcher picks the render style based on count:
+      1–3 items → interactive buttons (single tap, snappier UX)
+      4–10 items → interactive list (modal with a CTA button, two taps)
+    WhatsApp Cloud API caps button messages at 3 and list messages at 10."""
     with get_db() as db:
         rows = db.execute(
             """SELECT * FROM auto_replies
                 WHERE enabled = 1 AND show_in_menu = 1
                 ORDER BY menu_order ASC, id ASC
-                LIMIT 3"""
+                LIMIT 10"""
         ).fetchall()
         return [dict(r) for r in rows]
 
