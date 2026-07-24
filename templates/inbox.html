@@ -87,16 +87,46 @@
   .tpl-btn { background:transparent; border:1px solid var(--border); color:#1e293b; border-radius:8px; padding:0 10px; font-size:16px; cursor:pointer; flex-shrink:0; }
   .tpl-btn:hover { background:rgba(15,23,42,0.04); border-color:var(--amber); color:var(--amber); }
 
-  /* Mobile: stack conversation list above the chat */
+  /* Mobile: show EITHER the list OR the open chat (WhatsApp pattern). */
+  .inbox-back { display:none; }
   @media (max-width: 820px) {
     .inbox-wrap { flex-direction:column; height:auto; min-height:0; gap:0; }
-    .conv-list { width:100%; max-height:240px; border-radius:12px 12px 0 0; }
-    .chat-wrap { border-left:1px solid var(--border); border-radius:0 0 12px 12px; min-height:62vh; }
-    .bubble { max-width:85%; }
+    .conv-list { width:100%; max-height:none; height:calc(100vh - 130px); border-radius:12px; border-right:1px solid var(--border); }
+    .chat-wrap { border-left:1px solid var(--border); border-radius:12px; min-height:calc(100vh - 130px); }
+    .bubble { max-width:88%; font-size:14.5px; }
+
+    /* When a chat is open on mobile, hide the conversation list */
+    .inbox-wrap.has-active .conv-list { display:none; }
+    /* When no chat is open, hide the empty chat-wrap */
+    .inbox-wrap:not(.has-active) .chat-wrap { display:none; }
+
+    /* Show the back-to-list button only on mobile, only when chat is open */
+    .inbox-wrap.has-active .inbox-back { display:inline-flex; }
+    .inbox-back {
+      background:transparent; border:0; color:#0f172a; font-size:22px;
+      width:36px; height:36px; align-items:center; justify-content:center;
+      cursor:pointer; padding:0; margin-right:4px; flex-shrink:0;
+    }
+    .inbox-back:hover { background:#f1f5f9; border-radius:8px; }
+
+    /* Chat header: keep title visible, shrink delete to icon-only */
+    .chat-header { padding:10px 12px; }
+    #headerDelete { padding:7px 10px !important; font-size:0 !important; }
+    #headerDelete::after { content:"🗑"; font-size:14px; }
+
+    /* Composer area on mobile — finger-friendly */
+    .chat-input-bar textarea { font-size:16px !important; min-height:44px; }
+    .chat-input-bar button { min-height:44px; }
+    .conv-item { padding:14px 14px; }
+    .conv-name { font-size:15px; }
+    .conv-preview { font-size:13px; }
+
+    /* Sticky composer at bottom on mobile so the keyboard doesn't bury it */
+    .chat-input-bar { position:sticky; bottom:0; z-index:5; }
   }
 </style>
 
-<div class="inbox-wrap">
+<div class="inbox-wrap {% if active_phone %}has-active{% endif %}">
 
   <!-- ── Conversation list ── -->
   <div class="conv-list">
@@ -147,6 +177,7 @@
 
       <!-- Header -->
       <div class="chat-header">
+        <a href="{{ url_for('inbox') }}" class="inbox-back" title="Back to conversation list" aria-label="Back">←</a>
         <div>
           <div class="chat-title">{{ customer_name or active_phone }}</div>
           <div class="chat-phone">+{{ active_phone }}</div>

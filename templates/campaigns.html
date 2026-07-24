@@ -15,6 +15,20 @@
   .empty-state { text-align:center; padding:48px 20px; color:#cbd5e1; }
   .empty-state .icon { font-size:48px; margin-bottom:12px; }
   .right-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; position:sticky; top:20px; }
+
+  /* Mobile: card content stacks above actions; actions go full-width side-by-side. */
+  @media (max-width: 820px) {
+    .camp-card > div:first-child { flex-direction:column; }
+    .camp-card > div:first-child > div:last-child {
+      flex-direction:row !important; flex-wrap:wrap; min-width:0 !important; width:100%; gap:6px;
+    }
+    .camp-card > div:first-child > div:last-child > * { flex:1; min-width:90px; }
+    .camp-card > div:first-child > div:last-child .btn,
+    .camp-card > div:first-child > div:last-child form { width:100%; }
+    .banner-row { padding:10px 12px; }
+    .banner-form { margin-left:0 !important; width:100%; justify-content:flex-end; }
+  }
+
   .banner-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:6px; padding:8px 10px; background:#f8fafc; border:1px solid var(--border); border-radius:8px; }
   .banner-status { font-size:12px; }
   .banner-custom { color:var(--success, #10b981); font-weight:600; }

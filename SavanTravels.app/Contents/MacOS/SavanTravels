@@ -28,9 +28,23 @@ fi
 
 # ── Start ngrok tunnel if not already running ──────────────────────────────
 if ! pgrep -x ngrok > /dev/null 2>&1; then
-    $NGROK http --domain=$DOMAIN $PORT > /tmp/ngrok-savan.log 2>&1 &
-    sleep 2
+    # Start ngrok on the local port (generates a fresh random URL)
+    $NGROK http $PORT > /tmp/ngrok-savan.log 2>&1 &
+    sleep 3
+fi
+
+# Fetch the active public URL from ngrok's local API
+NGROK_URL=$(curl -s http://127.0.0.1:4040/api/tunnels | python3 -c "import sys, json; print(json.load(sys.stdin)['tunnels'][0]['public_url'])" 2>/dev/null)
+
+if [ -n "$NGROK_URL" ]; then
+    WEBHOOK_URL="$NGROK_URL/webhook"
+    # Auto-save the fresh URL to database settings
+    $PYTHON -c "import sys; sys.path.append('$APP_DIR'); import database as db; db.set_setting('webhook_url', '$WEBHOOK_URL')" 2>/dev/null
+    # Copy the fresh URL to the clipboard
+    echo -n "$WEBHOOK_URL" | pbcopy
+    $OSASCRIPT -e "display notification \"Copied: $WEBHOOK_URL\" with title \"Savan Travels Webhook\""
 fi
 
 # ── Open app in browser ───────────────────────────────────────────────────
 $OPEN "http://localhost:$PORT"
+

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Routes & Buses{% endblock %}
+{% block page_title %}Routes & Bus Trips{% endblock %}
+
+{% block content %}
+<style>
+  .rt-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; margin-bottom:14px; }
+  .rt-head { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+  .rt-name { font-family:'Bricolage Grotesque',sans-serif; font-size:17px; font-weight:700; color:#0f172a; }
+  .rt-meta { font-size:11.5px; color:#94a3b8; }
+  .pill-off { background:#fee2e2; color:#991b1b; font-size:11px; padding:2px 9px; border-radius:99px; font-weight:600; }
+  .pill-on  { background:#d1fae5; color:#047857; font-size:11px; padding:2px 9px; border-radius:99px; font-weight:600; }
+  .trips-table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+  .trips-table th { text-align:left; padding:6px 8px; color:#64748b; font-size:11.5px; font-weight:600; text-transform:uppercase; border-bottom:1px solid var(--border); }
+  .trips-table td { padding:8px; border-bottom:1px solid var(--border); }
+  .trips-table input { background:#f8fafc; border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12.5px; width:100%; }
+  .trips-table .col-time { width:90px; }
+  .trips-table .col-fare { width:110px; }
+  .trips-table .col-actions { width:120px; text-align:right; }
+  .new-trip { background:#fffbeb; border-left:3px solid var(--amber); padding:10px 12px; margin-top:10px; border-radius:6px; }
+  .right-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px; position:sticky; top:20px; }
+
+  /* ── Mobile: trip rows become stacked cards, route header wraps cleanly. */
+  @media (max-width: 820px) {
+    .trips-table, .trips-table thead, .trips-table tbody, .trips-table tr, .trips-table td {
+      display:block; width:100%;
+    }
+    .trips-table thead { display:none; }                /* header row meaningless when each row is a card */
+    .trips-table tr {
+      background:#f8fafc; border:1px solid var(--border); border-radius:8px;
+      padding:10px; margin-bottom:8px;
+    }
+    .trips-table td { border:0; padding:5px 0; }
+    .trips-table td::before {
+      content: attr(data-label); display:block;
+      font-size:11px; color:#64748b; font-weight:600; margin-bottom:2px;
+      text-transform:uppercase; letter-spacing:.04em;
+    }
+    .trips-table td.col-actions { display:flex; gap:8px; padding-top:8px; }
+    .trips-table td.col-actions::before { display:none; }
+    .trips-table td.col-actions .btn { flex:1; }
+
+    .rt-head { flex-wrap:wrap; gap:8px; }
+    .rt-head form { flex-direction:column !important; align-items:stretch !important; }
+    .rt-head form > * { width:100% !important; }
+    .new-trip > div:nth-child(2) { flex-direction:column !important; }
+    .new-trip > div:nth-child(2) > * { width:100% !important; }
+  }
+</style>
+
+<div style="display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;">
+
+  <!-- LEFT: list of routes -->
+  <div>
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:18px;font-weight:700;margin-bottom:12px;">
+      Configured Routes <span style="font-size:13px;color:#94a3b8;font-weight:500;">({{ routes|length }})</span>
+    </div>
+
+    {% if routes %}
+      {% for r in routes %}
+      <div class="rt-card">
+        <div class="rt-head">
+          <form method="POST" action="{{ url_for('routes_edit', route_id=r.id) }}"
+                style="display:flex;gap:8px;align-items:center;flex:1;flex-wrap:wrap;">
+            <input type="text" name="origin"      value="{{ r.origin }}"
+                   class="input" style="width:auto;padding:6px 10px;font-size:14px;font-weight:600;flex:1;min-width:120px;" required>
+            <span style="font-size:16px;color:#94a3b8;">→</span>
+            <input type="text" name="destination" value="{{ r.destination }}"
+                   class="input" style="width:auto;padding:6px 10px;font-size:14px;font-weight:600;flex:1;min-width:120px;" required>
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#475569;">
+              <input type="checkbox" name="active" {% if r.active %}checked{% endif %}> Active
+            </label>
+            <button type="submit" class="btn btn-ghost btn-sm">💾</button>
+          </form>
+          <form method="POST" action="{{ url_for('routes_delete', route_id=r.id) }}"
+                onsubmit="return confirm('Delete this route and all its trips?');"
+                style="margin:0;">
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:#ef4444;">🗑</button>
+          </form>
+        </div>
+
+        <div class="rt-meta">{{ r.trips|length }} bus trip{{ 's' if r.trips|length != 1 else '' }} configured</div>
+
+        {% if r.trips %}
+        <table class="trips-table">
+          <thead>
+            <tr>
+              <th class="col-time">Time</th>
+              <th>Bus type</th>
+              <th class="col-fare">Fare (₹)</th>
+              <th style="width:90px;">Status</th>
+              <th class="col-actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in r.trips %}
+            <tr>
+              <form method="POST" action="{{ url_for('trips_edit', trip_id=t.id) }}" style="display:contents;">
+                <td data-label="Time"><input type="time" name="departure_time" value="{{ t.departure_time }}" required></td>
+                <td data-label="Bus type"><input type="text" name="bus_type"       value="{{ t.bus_type }}" placeholder="AC Sleeper / Semi-Sleeper"></td>
+                <td data-label="Fare (₹)"><input type="number" name="fare"          value="{{ t.fare }}" min="0" required></td>
+                <td data-label="Status">
+                  <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#475569;">
+                    <input type="checkbox" name="active" {% if t.active %}checked{% endif %}> Active
+                  </label>
+                </td>
+                <td class="col-actions">
+                  <button type="submit" class="btn btn-ghost btn-sm">💾 Save</button>
+              </form>
+                  <form method="POST" action="{{ url_for('trips_delete', trip_id=t.id) }}"
+                        onsubmit="return confirm('Delete this trip?');"
+                        style="display:inline;margin:0;">
+                    <button type="submit" class="btn btn-ghost btn-sm" style="color:#ef4444;">🗑</button>
+                  </form>
+                </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+
+        <!-- Add trip -->
+        <form method="POST" action="{{ url_for('trips_create', route_id=r.id) }}" class="new-trip">
+          <div style="font-size:12px;color:#92400e;font-weight:600;margin-bottom:6px;">+ Add a new bus on this route</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <input type="time"   name="departure_time" required placeholder="HH:MM" style="background:#fff;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;width:120px;">
+            <input type="text"   name="bus_type"       placeholder="AC Sleeper"     style="background:#fff;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;flex:1;min-width:140px;">
+            <input type="number" name="fare" min="0" required placeholder="₹ fare"  style="background:#fff;border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;width:120px;">
+            <button type="submit" class="btn btn-primary btn-sm">Add trip</button>
+          </div>
+        </form>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="rt-card" style="text-align:center;padding:36px 16px;color:#94a3b8;">
+        <div style="font-size:36px;margin-bottom:8px;">🚌</div>
+        <div style="font-size:14px;">No routes configured yet. Add one on the right →</div>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- RIGHT: new route form -->
+  <div>
+    <div class="right-card">
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:17px;font-weight:700;margin-bottom:4px;">✨ Add a Route</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:16px;">Origin → destination. Add bus trips inline below.</div>
+
+      <form method="POST" action="{{ url_for('routes_create') }}">
+        <label class="input-label">Origin</label>
+        <input type="text" name="origin" class="input" placeholder="e.g. Surat" required style="margin-bottom:10px;">
+
+        <label class="input-label">Destination</label>
+        <input type="text" name="destination" class="input" placeholder="e.g. Mumbai" required style="margin-bottom:14px;">
+
+        <button type="submit" class="btn btn-primary" style="width:100%;">💾 Add Route</button>
+      </form>
+
+      <div style="margin-top:18px;padding:12px;background:#f0fdf4;border-radius:8px;font-size:12px;color:#166534;line-height:1.55;">
+        💡 <strong>Tip:</strong> after adding a route, scroll down to it on the left and use the "+ Add a new bus" form to add trip times and fares.
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

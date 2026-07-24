@@ -45,12 +45,19 @@ if not MONGO_URI:
         update_campaign_last_used, delete_campaign,
         update_campaign_image, clear_campaign_image,
         save_chat_message, get_conversation, list_conversations, mark_read,
-        delete_conversation,
+        delete_conversation, count_recent_outbound,
         get_unread_count, update_chat_status, get_new_messages,
         change_user_password, delete_user,
         create_auto_reply, list_auto_replies, get_auto_reply,
         update_auto_reply, delete_auto_reply, set_auto_reply_enabled,
         get_menu_button_replies, find_auto_reply_by_text,
+        create_route, list_routes, get_route, update_route, delete_route,
+        list_distinct_origins, list_destinations_from,
+        create_trip, list_trips_for_route, get_trip, update_trip, delete_trip,
+        get_active_booking_session, create_booking_session,
+        update_booking_session, close_booking_session,
+        create_booking, list_bookings, get_booking, get_booking_by_pnr,
+        update_booking_status,
         init_db, hash_password, verify_password,
     )
 else:
@@ -501,11 +508,13 @@ else:
         """Bulk/template messages sent to this phone, oldest first.
         Used in the inbox to show template sends alongside chat messages.
         """
-        return _clean_many(
+        docs = list(
             _db().messages.find({"customer_phone": phone})
-            .sort("sent_at", ASCENDING)
+            .sort("sent_at", DESCENDING)
             .limit(limit)
         )
+        docs.reverse()
+        return _clean_many(docs)
 
     def get_today_conversations():
         """Count of UNIQUE customer phones we successfully sent to today (IST).
@@ -691,11 +700,13 @@ else:
         return msg_id
 
     def get_conversation(phone, limit=100):
-        return _clean_many(
+        docs = list(
             _db().chats.find({"phone": phone})
-            .sort("timestamp", ASCENDING)
+            .sort("timestamp", DESCENDING)
             .limit(limit)
         )
+        docs.reverse()
+        return _clean_many(docs)
 
     def list_conversations(limit=50):
         # Single aggregation — was previously 1 aggregation + N count_documents
@@ -742,6 +753,16 @@ else:
         """Delete all chat messages for one phone number (entire conversation)."""
         return _db().chats.delete_many({"phone": phone}).deleted_count
 
+    def count_recent_outbound(phone, hours):
+        """Count outbound chat messages to this phone in the last `hours`."""
+        import datetime as _dt
+        ist_now = _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
+        threshold = (ist_now - _dt.timedelta(hours=int(hours))).strftime("%Y-%m-%d %H:%M:%S")
+        return _db().chats.count_documents({
+            "phone": phone, "direction": "out",
+            "timestamp": {"$gte": threshold},
+        })
+
     def get_unread_count():
         return _db().chats.count_documents({"direction": "in", "read": 0})
 
@@ -762,7 +783,7 @@ else:
     # mirrors the SQLite row exactly so the calling code is identical.
 
     def create_auto_reply(label, keywords, response_text, show_in_menu=False,
-                           menu_order=0, description=""):
+                           menu_order=0, description="", flow_kind=""):
         new_id = _next_id("auto_replies")
         _db().auto_replies.insert_one({
             "id":            new_id,
@@ -773,6 +794,7 @@ else:
             "description":   (description or "").strip(),
             "show_in_menu":  1 if show_in_menu else 0,
             "menu_order":    int(menu_order or 0),
+            "flow_kind":     (flow_kind or "").strip(),
             "created_at":    _now(),
             "updated_at":    _now(),
         })
@@ -789,7 +811,7 @@ else:
         return _clean(_db().auto_replies.find_one({"id": int(reply_id)}))
 
     def update_auto_reply(reply_id, label, keywords, response_text, show_in_menu,
-                           menu_order, description=""):
+                           menu_order, description="", flow_kind=""):
         _db().auto_replies.update_one({"id": int(reply_id)}, {"$set": {
             "trigger_label": (label or "").strip(),
             "keywords":      (keywords or "").strip(),
@@ -797,6 +819,7 @@ else:
             "description":   (description or "").strip(),
             "show_in_menu":  1 if show_in_menu else 0,
             "menu_order":    int(menu_order or 0),
+            "flow_kind":     (flow_kind or "").strip(),
             "updated_at":    _now(),
         }})
 
@@ -839,6 +862,166 @@ else:
                 if kw and kw in needle:
                     return r
         return None
+
+    # ── Routes & bus trips ────────────────────────────────────────────────────
+
+    def create_route(origin, destination):
+        new_id = _next_id("routes")
+        _db().routes.insert_one({
+            "id": new_id, "origin": origin.strip(),
+            "destination": destination.strip(),
+            "active": 1, "created_at": _now(),
+        })
+        return new_id
+
+    def list_routes(active_only=False):
+        q = {"active": 1} if active_only else {}
+        return _clean_many(_db().routes.find(q).sort(
+            [("origin", ASCENDING), ("destination", ASCENDING), ("id", ASCENDING)]
+        ))
+
+    def get_route(route_id):
+        return _clean(_db().routes.find_one({"id": int(route_id)}))
+
+    def update_route(route_id, origin, destination, active):
+        _db().routes.update_one({"id": int(route_id)}, {"$set": {
+            "origin": origin.strip(), "destination": destination.strip(),
+            "active": 1 if active else 0,
+        }})
+
+    def delete_route(route_id):
+        _db().bus_trips.delete_many({"route_id": int(route_id)})
+        _db().routes.delete_one({"id": int(route_id)})
+
+    def list_distinct_origins():
+        return sorted({r["origin"] for r in _db().routes.find({"active": 1}, {"origin": 1})})
+
+    def list_destinations_from(origin):
+        return _clean_many(_db().routes.find({"active": 1, "origin": origin})
+                           .sort("destination", ASCENDING))
+
+    def create_trip(route_id, departure_time, bus_type, fare):
+        new_id = _next_id("bus_trips")
+        _db().bus_trips.insert_one({
+            "id": new_id, "route_id": int(route_id),
+            "departure_time": departure_time.strip(),
+            "bus_type": (bus_type or "").strip(),
+            "fare": int(fare or 0),
+            "active": 1, "created_at": _now(),
+        })
+        return new_id
+
+    def list_trips_for_route(route_id, active_only=True):
+        q = {"route_id": int(route_id)}
+        if active_only:
+            q["active"] = 1
+        return _clean_many(_db().bus_trips.find(q).sort(
+            [("departure_time", ASCENDING), ("id", ASCENDING)]
+        ))
+
+    def get_trip(trip_id):
+        return _clean(_db().bus_trips.find_one({"id": int(trip_id)}))
+
+    def update_trip(trip_id, departure_time, bus_type, fare, active):
+        _db().bus_trips.update_one({"id": int(trip_id)}, {"$set": {
+            "departure_time": departure_time.strip(),
+            "bus_type": (bus_type or "").strip(),
+            "fare": int(fare or 0),
+            "active": 1 if active else 0,
+        }})
+
+    def delete_trip(trip_id):
+        _db().bus_trips.delete_one({"id": int(trip_id)})
+
+    # ── Booking sessions (in-progress conversation state) ────────────────────
+
+    import datetime as _dt
+    def _ist_now():
+        # IST = UTC+5:30. Match what sqlite stores.
+        return _dt.datetime.utcnow() + _dt.timedelta(hours=5, minutes=30)
+    def _iso(t): return t.strftime("%Y-%m-%d %H:%M:%S")
+
+    def get_active_booking_session(phone):
+        now = _iso(_ist_now())
+        # Sweep expired sessions
+        _db().booking_sessions.delete_many({"expires_at": {"$lt": now}})
+        return _clean(_db().booking_sessions.find_one(
+            {"phone": phone}, sort=[("id", DESCENDING)]
+        ))
+
+    def create_booking_session(phone, state="ask_origin"):
+        _db().booking_sessions.delete_many({"phone": phone})
+        new_id = _next_id("booking_sessions")
+        now = _ist_now()
+        _db().booking_sessions.insert_one({
+            "id": new_id, "phone": phone, "state": state,
+            "origin": None, "destination": None,
+            "route_id": None, "trip_id": None,
+            "travel_date": None, "seats": None,
+            "customer_name": None,
+            "expires_at": _iso(now + _dt.timedelta(hours=1)),
+            "created_at": _iso(now), "updated_at": _iso(now),
+        })
+        return new_id
+
+    def update_booking_session(session_id, **fields):
+        allowed = {"state","origin","destination","route_id","trip_id",
+                   "travel_date","seats","customer_name"}
+        upd = {k:v for k,v in fields.items() if k in allowed}
+        if not upd:
+            return
+        now = _ist_now()
+        upd["updated_at"] = _iso(now)
+        upd["expires_at"] = _iso(now + _dt.timedelta(hours=1))
+        _db().booking_sessions.update_one({"id": int(session_id)}, {"$set": upd})
+
+    def close_booking_session(phone):
+        _db().booking_sessions.delete_many({"phone": phone})
+
+    # ── Bookings (final saved requests) ──────────────────────────────────────
+
+    def _new_pnr():
+        import secrets, string
+        alphabet = string.ascii_uppercase + string.digits
+        for _ in range(20):
+            candidate = "SVN" + "".join(secrets.choice(alphabet) for _ in range(6))
+            if not _db().bookings.find_one({"pnr": candidate}):
+                return candidate
+        raise RuntimeError("could not allocate unique PNR")
+
+    def create_booking(*, phone, customer_name, route_id, origin, destination,
+                       trip_id, departure_time, bus_type,
+                       travel_date, seats, fare_per_seat):
+        pnr = _new_pnr()
+        total = int(fare_per_seat or 0) * int(seats or 1)
+        new_id = _next_id("bookings")
+        _db().bookings.insert_one({
+            "id": new_id, "pnr": pnr, "phone": phone,
+            "customer_name": customer_name,
+            "route_id": route_id, "origin": origin, "destination": destination,
+            "trip_id": trip_id, "departure_time": departure_time,
+            "bus_type": bus_type, "travel_date": travel_date,
+            "seats": int(seats or 1), "fare_per_seat": int(fare_per_seat or 0),
+            "total_fare": total, "status": "pending", "notes": None,
+            "created_at": _now(), "updated_at": _now(),
+        })
+        return pnr
+
+    def list_bookings(status=None, limit=200):
+        q = {"status": status} if status else {}
+        return _clean_many(_db().bookings.find(q).sort("id", DESCENDING).limit(limit))
+
+    def get_booking(booking_id):
+        return _clean(_db().bookings.find_one({"id": int(booking_id)}))
+
+    def get_booking_by_pnr(pnr):
+        return _clean(_db().bookings.find_one({"pnr": pnr}))
+
+    def update_booking_status(booking_id, status, notes=None):
+        upd = {"status": status, "updated_at": _now()}
+        if notes is not None:
+            upd["notes"] = notes
+        _db().bookings.update_one({"id": int(booking_id)}, {"$set": upd})
 
 
 if __name__ == "__main__":

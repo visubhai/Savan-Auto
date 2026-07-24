@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Bookings{% endblock %}
+{% block page_title %}Bookings{% endblock %}
+
+{% block content %}
+<style>
+  .bk-tabs { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid var(--border); }
+  .bk-tab { padding:8px 16px; font-size:13px; font-weight:600; color:#94a3b8; border-bottom:2px solid transparent; cursor:pointer; text-decoration:none; }
+  .bk-tab.active { color:var(--amber); border-bottom-color:var(--amber); }
+  .bk-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:10px; }
+  .bk-card.pending { border-left:4px solid var(--amber); }
+  .bk-card.confirmed { border-left:4px solid #10b981; }
+  .bk-card.cancelled { border-left:4px solid #ef4444; opacity:0.7; }
+  .pnr { font-family:monospace; font-size:14px; font-weight:700; color:#0f172a; background:#f1f5f9; padding:2px 8px; border-radius:4px; }
+  .bk-row { display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap; }
+  .bk-main { flex:1; min-width:240px; }
+  .bk-actions { display:flex; flex-direction:column; gap:6px; flex-shrink:0; min-width:120px; }
+  .bk-meta { font-size:12px; color:#64748b; margin-top:6px; line-height:1.6; }
+  .bk-meta strong { color:#0f172a; }
+  .bk-pill { font-size:11px; padding:2px 8px; border-radius:99px; font-weight:600; margin-left:6px; }
+  .pill-pending { background:#fef3c7; color:#92400e; }
+  .pill-confirmed { background:#d1fae5; color:#047857; }
+  .pill-cancelled { background:#fee2e2; color:#991b1b; }
+  .notes-input { width:100%; background:#f8fafc; border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; margin-top:4px; resize:vertical; font-family:inherit; }
+
+  /* Mobile: actions move below content, buttons go full-width, tabs scroll horizontally. */
+  @media (max-width: 820px) {
+    .bk-tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; white-space:nowrap; }
+    .bk-tab { flex-shrink:0; padding:10px 14px; }
+    .bk-row { flex-direction:column; gap:10px; }
+    .bk-main { min-width:0; width:100%; }
+    .bk-actions { width:100%; flex-direction:column; }
+    .bk-actions form { width:100%; }
+    .bk-actions .btn { width:100%; min-height:42px; }
+    .pnr { font-size:13px; }
+    .notes-input { font-size:14px; padding:8px 10px; }
+  }
+</style>
+
+<div class="bk-tabs">
+  <a href="{{ url_for('bookings_page') }}"
+     class="bk-tab {% if not status_filter %}active{% endif %}">All</a>
+  <a href="{{ url_for('bookings_page', status='pending') }}"
+     class="bk-tab {% if status_filter == 'pending' %}active{% endif %}">⏳ Pending</a>
+  <a href="{{ url_for('bookings_page', status='confirmed') }}"
+     class="bk-tab {% if status_filter == 'confirmed' %}active{% endif %}">✓ Confirmed</a>
+  <a href="{{ url_for('bookings_page', status='cancelled') }}"
+     class="bk-tab {% if status_filter == 'cancelled' %}active{% endif %}">✗ Cancelled</a>
+</div>
+
+{% if bookings %}
+  {% for bk in bookings %}
+  <div class="bk-card {{ bk.status }}">
+    <div class="bk-row">
+      <div class="bk-main">
+        <div style="margin-bottom:4px;">
+          <span class="pnr">{{ bk.pnr }}</span>
+          <span class="bk-pill pill-{{ bk.status }}">
+            {% if bk.status == 'pending' %}⏳ PENDING{% elif bk.status == 'confirmed' %}✓ CONFIRMED{% else %}✗ CANCELLED{% endif %}
+          </span>
+          <span style="font-size:12px;color:#94a3b8;margin-left:6px;">
+            {{ bk.created_at[:16] if bk.created_at else '' }}
+          </span>
+        </div>
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:15px;font-weight:700;color:#0f172a;">
+          {{ bk.customer_name or '(no name)' }}
+          <a href="{{ url_for('inbox', phone=bk.phone) }}"
+             style="font-size:12px;color:var(--amber);text-decoration:none;font-weight:500;margin-left:8px;">
+             +{{ bk.phone }} ↗
+          </a>
+        </div>
+        <div class="bk-meta">
+          <strong>{{ bk.origin }} → {{ bk.destination }}</strong>
+          {% if bk.travel_date %} · {{ bk.travel_date }}{% endif %}
+          {% if bk.departure_time %} · {{ bk.departure_time }}{% endif %}
+          {% if bk.bus_type %} · {{ bk.bus_type }}{% endif %}
+          <br>
+          <strong>{{ bk.seats }}</strong> seat{{ 's' if bk.seats != 1 else '' }} ·
+          ₹{{ bk.fare_per_seat }} × {{ bk.seats }} = <strong>₹{{ bk.total_fare }}</strong>
+        </div>
+        {% if bk.notes %}
+        <div style="font-size:12px;color:#64748b;font-style:italic;margin-top:6px;">Note: {{ bk.notes }}</div>
+        {% endif %}
+      </div>
+
+      {% if bk.status == 'pending' %}
+      <div class="bk-actions">
+        <form method="POST" action="{{ url_for('bookings_confirm', booking_id=bk.id) }}"
+              onsubmit="return confirm('Confirm this booking and notify customer?');">
+          <textarea name="notes" class="notes-input" rows="1" placeholder="Optional note for customer…"></textarea>
+          <button type="submit" class="btn btn-primary btn-sm" style="width:100%;margin-top:4px;">✓ Confirm</button>
+        </form>
+        <form method="POST" action="{{ url_for('bookings_cancel', booking_id=bk.id) }}"
+              onsubmit="return confirm('Cancel this booking and notify customer?');">
+          <textarea name="notes" class="notes-input" rows="1" placeholder="Reason (sent to customer)…"></textarea>
+          <button type="submit" class="btn btn-ghost btn-sm" style="width:100%;margin-top:4px;color:#ef4444;">✗ Cancel</button>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="bk-card" style="text-align:center;padding:40px 16px;color:#94a3b8;">
+    <div style="font-size:36px;margin-bottom:8px;">🎫</div>
+    <div style="font-size:14px;">
+      No bookings {% if status_filter %}with status '{{ status_filter }}'{% else %}yet{% endif %}.
+      <br><span style="font-size:12px;">Customer bookings via the WhatsApp flow appear here.</span>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

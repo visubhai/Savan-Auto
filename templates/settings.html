@@ -87,7 +87,7 @@
       <div>
         <label class="input-label">Callback URL (paste in Meta)</label>
         <div style="display:flex;gap:8px;align-items:center;">
-          <input type="text" id="webhookUrl" readonly value="{{ settings.webhook_url or (request.host_url.rstrip('/') + '/webhook') }}" class="input" style="flex:1;color:#1e293b;font-size:12px;">
+          <input type="text" id="webhookUrl" name="webhook_url" value="{{ settings.webhook_url or (request.host_url.rstrip('/') + '/webhook') }}" class="input" style="flex:1;color:#1e293b;font-size:12px;">
           <button type="button" onclick="copyWebhook()" class="btn btn-ghost btn-sm">Copy</button>
         </div>
         <div style="font-size:11px;color:#94a3b8;margin-top:4px;">This is your permanent public URL — copy it into Meta once, never change it again.</div>
@@ -95,7 +95,8 @@
       <div>
         <label class="input-label">Verify Token (copy exactly into Meta)</label>
         <div style="display:flex;gap:8px;align-items:center;">
-          <input type="text" id="verifyToken" readonly value="{{ settings.webhook_verify_token or '' }}" class="input" style="flex:1;font-family:monospace;font-size:13px;">
+          <input type="text" id="verifyToken" name="webhook_verify_token" value="{{ settings.webhook_verify_token or '' }}" class="input" style="flex:1;font-family:monospace;font-size:13px;">
+          <button type="button" onclick="generateToken()" class="btn btn-ghost btn-sm" style="color:var(--primary);">Generate</button>
           <button type="button" onclick="copyToken()" class="btn btn-ghost btn-sm">Copy</button>
         </div>
       </div>
@@ -241,6 +242,15 @@ function copyWebhook() {
 function copyToken() {
   var v = document.getElementById('verifyToken').value;
   navigator.clipboard.writeText(v).then(function(){ toast('Verify token copied!'); });
+}
+function generateToken() {
+  var chars = 'abcdef0123456789';
+  var token = '';
+  for (var i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  document.getElementById('verifyToken').value = token;
+  toast('New verify token generated! Remember to click Save Settings.');
 }
 function copyAllAndOpenMeta() {
   var url = document.getElementById('webhookUrl').value;

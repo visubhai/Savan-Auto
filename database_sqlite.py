@@ -174,9 +174,74 @@ def init_db():
             description TEXT NOT NULL DEFAULT '',
             show_in_menu INTEGER NOT NULL DEFAULT 0,
             menu_order INTEGER NOT NULL DEFAULT 0,
+            flow_kind TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
         );
+
+        -- Bus routes (origin → destination pairs)
+        CREATE TABLE IF NOT EXISTS routes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            origin TEXT NOT NULL,
+            destination TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
+        );
+
+        -- A bus departure on a route (route + time + bus type + fare)
+        CREATE TABLE IF NOT EXISTS bus_trips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            route_id INTEGER NOT NULL,
+            departure_time TEXT NOT NULL,         -- 'HH:MM' 24-hour
+            bus_type TEXT NOT NULL DEFAULT '',    -- 'AC Sleeper', 'Semi-Sleeper', etc.
+            fare INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
+            FOREIGN KEY (route_id) REFERENCES routes(id)
+        );
+
+        -- In-progress booking conversations. One row per (phone, active session).
+        -- Expires after 1 hour of inactivity so abandoned sessions don't stick.
+        CREATE TABLE IF NOT EXISTS booking_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone TEXT NOT NULL,
+            state TEXT NOT NULL,                  -- 'ask_origin' | 'ask_destination' | 'ask_date' | 'ask_trip' | 'ask_seats' | 'confirm'
+            origin TEXT,
+            destination TEXT,
+            route_id INTEGER,
+            trip_id INTEGER,
+            travel_date TEXT,                     -- 'YYYY-MM-DD'
+            seats INTEGER,
+            customer_name TEXT,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_booking_sessions_phone ON booking_sessions(phone);
+
+        -- Final booking requests. Operator confirms or cancels via /bookings.
+        CREATE TABLE IF NOT EXISTS bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pnr TEXT NOT NULL UNIQUE,
+            phone TEXT NOT NULL,
+            customer_name TEXT,
+            route_id INTEGER,
+            origin TEXT,                          -- snapshot — route may change later
+            destination TEXT,
+            trip_id INTEGER,
+            departure_time TEXT,                  -- snapshot
+            bus_type TEXT,                        -- snapshot
+            travel_date TEXT,                     -- 'YYYY-MM-DD'
+            seats INTEGER NOT NULL DEFAULT 1,
+            fare_per_seat INTEGER NOT NULL DEFAULT 0,
+            total_fare INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'confirmed' | 'cancelled'
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_bookings_phone ON bookings(phone);
+        CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
 
         CREATE INDEX IF NOT EXISTS idx_messages_batch ON messages(batch_id);
         CREATE INDEX IF NOT EXISTS idx_messages_phone ON messages(customer_phone);
@@ -234,6 +299,10 @@ def init_db():
         cols = {r["name"] for r in db.execute("PRAGMA table_info(auto_replies)").fetchall()}
         if "description" not in cols:
             db.execute("ALTER TABLE auto_replies ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        # flow_kind marks the menu item as a multi-step conversation starter
+        # rather than a static text reply. Empty = behave as before.
+        if "flow_kind" not in cols:
+            db.execute("ALTER TABLE auto_replies ADD COLUMN flow_kind TEXT NOT NULL DEFAULT ''")
 
     # Seed default admin if no users exist
     with get_db() as db:
@@ -572,10 +641,11 @@ def get_phone_messages(phone, limit=200):
     Used in the inbox to show template sends alongside chat messages.
     """
     with get_db() as db:
-        return db.execute(
-            "SELECT * FROM messages WHERE customer_phone=? ORDER BY sent_at ASC LIMIT ?",
+        rows = db.execute(
+            "SELECT * FROM messages WHERE customer_phone=? ORDER BY sent_at DESC LIMIT ?",
             (phone, limit),
         ).fetchall()
+        return rows[::-1]
 
 
 def get_today_conversations():
@@ -768,10 +838,11 @@ def save_chat_message(phone, customer_name, direction, content,
 
 def get_conversation(phone, limit=100):
     with get_db() as db:
-        return db.execute(
-            "SELECT * FROM chats WHERE phone=? ORDER BY timestamp ASC LIMIT ?",
+        rows = db.execute(
+            "SELECT * FROM chats WHERE phone=? ORDER BY timestamp DESC LIMIT ?",
             (phone, limit),
         ).fetchall()
+        return rows[::-1]
 
 
 def list_conversations(limit=50):
@@ -805,6 +876,21 @@ def delete_conversation(phone):
     with get_db() as db:
         cur = db.execute("DELETE FROM chats WHERE phone=?", (phone,))
         return cur.rowcount
+
+
+def count_recent_outbound(phone, hours):
+    """How many outbound messages were sent to this phone within the last
+    `hours`? Used by the auto-reply throttle: if we've already sent anything
+    (auto-reply, manual reply, template…) recently, don't re-fire the welcome
+    menu — the customer is mid-conversation."""
+    with get_db() as db:
+        row = db.execute(
+            """SELECT COUNT(*) AS c FROM chats
+                WHERE phone = ? AND direction = 'out'
+                  AND timestamp >= datetime('now', '+330 minutes', ?)""",
+            (phone, f"-{int(hours)} hours"),
+        ).fetchone()
+        return int(row["c"]) if row else 0
 
 
 def get_unread_count():
@@ -1037,6 +1123,239 @@ def find_auto_reply_by_text(text):
             if kw and kw in needle:
                 return dict(r)
     return None
+
+
+# ---------------- Routes & bus trips ----------------
+
+def create_route(origin, destination):
+    with get_db() as db:
+        cur = db.execute(
+            "INSERT INTO routes (origin, destination) VALUES (?, ?)",
+            (origin.strip(), destination.strip()),
+        )
+        return cur.lastrowid
+
+
+def list_routes(active_only=False):
+    sql = "SELECT * FROM routes"
+    if active_only:
+        sql += " WHERE active = 1"
+    sql += " ORDER BY origin ASC, destination ASC, id ASC"
+    with get_db() as db:
+        return [dict(r) for r in db.execute(sql).fetchall()]
+
+
+def get_route(route_id):
+    with get_db() as db:
+        row = db.execute("SELECT * FROM routes WHERE id=?", (int(route_id),)).fetchone()
+        return dict(row) if row else None
+
+
+def update_route(route_id, origin, destination, active):
+    with get_db() as db:
+        db.execute(
+            "UPDATE routes SET origin=?, destination=?, active=? WHERE id=?",
+            (origin.strip(), destination.strip(),
+             1 if active else 0, int(route_id)),
+        )
+
+
+def delete_route(route_id):
+    with get_db() as db:
+        # Trips are cascaded since they reference this route.
+        db.execute("DELETE FROM bus_trips WHERE route_id=?", (int(route_id),))
+        db.execute("DELETE FROM routes WHERE id=?", (int(route_id),))
+
+
+def list_distinct_origins():
+    """Distinct origin cities across enabled routes (for the booking flow)."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT DISTINCT origin FROM routes WHERE active=1 ORDER BY origin ASC"
+        ).fetchall()
+        return [r["origin"] for r in rows]
+
+
+def list_destinations_from(origin):
+    """Enabled routes leaving the given origin."""
+    with get_db() as db:
+        rows = db.execute(
+            """SELECT * FROM routes
+                WHERE active=1 AND origin=?
+                ORDER BY destination ASC""",
+            (origin,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def create_trip(route_id, departure_time, bus_type, fare):
+    with get_db() as db:
+        cur = db.execute(
+            """INSERT INTO bus_trips (route_id, departure_time, bus_type, fare)
+               VALUES (?, ?, ?, ?)""",
+            (int(route_id), departure_time.strip(),
+             (bus_type or "").strip(), int(fare or 0)),
+        )
+        return cur.lastrowid
+
+
+def list_trips_for_route(route_id, active_only=True):
+    sql = "SELECT * FROM bus_trips WHERE route_id=?"
+    params = [int(route_id)]
+    if active_only:
+        sql += " AND active=1"
+    sql += " ORDER BY departure_time ASC, id ASC"
+    with get_db() as db:
+        return [dict(r) for r in db.execute(sql, params).fetchall()]
+
+
+def get_trip(trip_id):
+    with get_db() as db:
+        row = db.execute("SELECT * FROM bus_trips WHERE id=?", (int(trip_id),)).fetchone()
+        return dict(row) if row else None
+
+
+def update_trip(trip_id, departure_time, bus_type, fare, active):
+    with get_db() as db:
+        db.execute(
+            """UPDATE bus_trips
+                  SET departure_time=?, bus_type=?, fare=?, active=?
+                WHERE id=?""",
+            (departure_time.strip(), (bus_type or "").strip(),
+             int(fare or 0), 1 if active else 0, int(trip_id)),
+        )
+
+
+def delete_trip(trip_id):
+    with get_db() as db:
+        db.execute("DELETE FROM bus_trips WHERE id=?", (int(trip_id),))
+
+
+# ---------------- Booking sessions (in-progress conversation state) ----------------
+
+def get_active_booking_session(phone):
+    """Return the unfinished session for this phone, or None.
+    Expired sessions (>1 hour idle) are auto-cleaned."""
+    with get_db() as db:
+        db.execute(
+            "DELETE FROM booking_sessions WHERE expires_at < datetime('now', '+330 minutes')"
+        )
+        row = db.execute(
+            """SELECT * FROM booking_sessions
+                WHERE phone = ?
+                ORDER BY id DESC LIMIT 1""",
+            (phone,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def create_booking_session(phone, state="ask_origin"):
+    """Start a fresh session, replacing any prior one for this phone."""
+    with get_db() as db:
+        db.execute("DELETE FROM booking_sessions WHERE phone=?", (phone,))
+        cur = db.execute(
+            """INSERT INTO booking_sessions (phone, state, expires_at)
+               VALUES (?, ?, datetime('now', '+330 minutes', '+1 hour'))""",
+            (phone, state),
+        )
+        return cur.lastrowid
+
+
+def update_booking_session(session_id, **fields):
+    """Update arbitrary session fields. Always bumps updated_at + expires_at."""
+    allowed = {"state","origin","destination","route_id","trip_id",
+               "travel_date","seats","customer_name"}
+    sets, vals = [], []
+    for k, v in fields.items():
+        if k in allowed:
+            sets.append(f"{k}=?")
+            vals.append(v)
+    if not sets:
+        return
+    sets.append("updated_at=datetime('now', '+330 minutes')")
+    sets.append("expires_at=datetime('now', '+330 minutes', '+1 hour')")
+    vals.append(int(session_id))
+    with get_db() as db:
+        db.execute(f"UPDATE booking_sessions SET {', '.join(sets)} WHERE id=?", vals)
+
+
+def close_booking_session(phone):
+    with get_db() as db:
+        db.execute("DELETE FROM booking_sessions WHERE phone=?", (phone,))
+
+
+# ---------------- Bookings (the final saved booking request) ----------------
+
+def _new_pnr():
+    """Generate a unique PNR like 'SVN8A1B2C'."""
+    import secrets, string
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(20):
+        candidate = "SVN" + "".join(secrets.choice(alphabet) for _ in range(6))
+        with get_db() as db:
+            hit = db.execute("SELECT 1 FROM bookings WHERE pnr=?", (candidate,)).fetchone()
+            if not hit:
+                return candidate
+    raise RuntimeError("could not allocate unique PNR")
+
+
+def create_booking(*, phone, customer_name, route_id, origin, destination,
+                    trip_id, departure_time, bus_type,
+                    travel_date, seats, fare_per_seat):
+    pnr = _new_pnr()
+    total = int(fare_per_seat or 0) * int(seats or 1)
+    with get_db() as db:
+        db.execute(
+            """INSERT INTO bookings
+                 (pnr, phone, customer_name, route_id, origin, destination,
+                  trip_id, departure_time, bus_type, travel_date,
+                  seats, fare_per_seat, total_fare, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+            (pnr, phone, customer_name, route_id, origin, destination,
+             trip_id, departure_time, bus_type, travel_date,
+             int(seats or 1), int(fare_per_seat or 0), total),
+        )
+    return pnr
+
+
+def list_bookings(status=None, limit=200):
+    sql = "SELECT * FROM bookings"
+    params = []
+    if status:
+        sql += " WHERE status=?"
+        params.append(status)
+    sql += " ORDER BY id DESC LIMIT ?"
+    params.append(int(limit))
+    with get_db() as db:
+        return [dict(r) for r in db.execute(sql, params).fetchall()]
+
+
+def get_booking(booking_id):
+    with get_db() as db:
+        row = db.execute("SELECT * FROM bookings WHERE id=?", (int(booking_id),)).fetchone()
+        return dict(row) if row else None
+
+
+def get_booking_by_pnr(pnr):
+    with get_db() as db:
+        row = db.execute("SELECT * FROM bookings WHERE pnr=?", (pnr,)).fetchone()
+        return dict(row) if row else None
+
+
+def update_booking_status(booking_id, status, notes=None):
+    with get_db() as db:
+        if notes is None:
+            db.execute(
+                "UPDATE bookings SET status=?, updated_at=datetime('now', '+330 minutes') WHERE id=?",
+                (status, int(booking_id)),
+            )
+        else:
+            db.execute(
+                """UPDATE bookings SET status=?, notes=?,
+                       updated_at=datetime('now', '+330 minutes')
+                   WHERE id=?""",
+                (status, notes, int(booking_id)),
+            )
 
 
 if __name__ == "__main__":

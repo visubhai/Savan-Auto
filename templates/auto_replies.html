@@ -26,6 +26,20 @@
   .menu-preview { background:#dcf8c6; border:1px solid #b8e2a1; border-radius:10px; padding:12px; margin-top:12px; font-size:13px; color:#1c3625; white-space:pre-wrap; }
   .menu-btn-preview { display:inline-block; background:#fff; border:1px solid #b8e2a1; border-radius:6px; padding:5px 12px; margin:4px 4px 0 0; font-size:12px; color:#075e54; font-weight:600; }
   .help { font-size:11.5px; color:#94a3b8; margin-top:-4px; margin-bottom:10px; line-height:1.5; }
+
+  /* Mobile: grid stacks, action column moves below content, form is full-width. */
+  @media (max-width: 820px) {
+    .ar-grid { grid-template-columns:1fr !important; }
+    .right-card { position:static !important; padding:18px !important; }
+    .ar-card > div:first-child { flex-direction:column !important; }
+    .ar-card > div:first-child > div:last-child {
+      flex-direction:row !important; flex-wrap:wrap; min-width:0 !important; width:100%;
+    }
+    .ar-card > div:first-child > div:last-child > * { flex:1; min-width:100px; }
+    .ar-card > div:first-child > div:last-child .btn { width:100%; }
+    .menu-preview { font-size:12px; }
+    .menu-btn-preview { display:inline-block; max-width:100%; word-wrap:break-word; }
+  }
 </style>
 
 <div class="ar-grid">
@@ -64,6 +78,14 @@
         <label class="input-label">List button label <span style="color:#94a3b8;font-weight:400;">(used when 4+ menu items)</span></label>
         <input type="text" name="list_button_label" class="input" maxlength="20" value="{{ list_button_label or 'Choose an option' }}" placeholder="Choose an option">
         <div class="help">Max 20 characters. Only used when you mark 4–10 replies as "show in menu" — they render as a tappable list instead of buttons.</div>
+
+        <label class="input-label">Welcome-menu cooldown <span style="color:#94a3b8;font-weight:400;">(hours)</span></label>
+        <input type="number" name="menu_cooldown_hours" class="input" min="0" max="168" value="{{ cooldown_hours or '24' }}" style="max-width:140px;">
+        <div class="help">
+          Only re-send the welcome menu if the customer has been silent for this many hours.
+          <strong>24</strong> (recommended) means once per fresh conversation — keyword/button replies still fire instantly, but a customer typing 10 messages in a row gets only one menu.
+          <strong>0</strong> disables the throttle (menu every inbound — spammy, not recommended).
+        </div>
 
         <button type="submit" class="btn btn-primary" style="margin-top:4px;">💾 Save Settings</button>
       </form>
@@ -127,6 +149,7 @@
             <div>
               <span class="ar-label">{{ r.trigger_label }}</span>
               {% if r.show_in_menu %}<span class="ar-pill pill-menu">📌 menu #{{ r.menu_order }}</span>{% endif %}
+              {% if r.flow_kind == 'booking' %}<span class="ar-pill" style="background:#dbeafe;color:#1d4ed8;">🚌 booking flow</span>{% endif %}
               {% if r.enabled %}<span class="ar-pill pill-on">ON</span>{% else %}<span class="ar-pill pill-off">OFF</span>{% endif %}
             </div>
             {% if r.keywords %}
@@ -147,6 +170,7 @@
               data-keywords="{{ r.keywords }}"
               data-text="{{ r.response_text }}"
               data-desc="{{ r.description or '' }}"
+              data-flow="{{ r.flow_kind or '' }}"
               data-menu="{{ r.show_in_menu }}"
               data-order="{{ r.menu_order }}">✏ Edit</button>
             <form method="POST" action="{{ url_for('auto_replies_delete', reply_id=r.id) }}"
@@ -189,6 +213,13 @@
         <input type="text" name="description" id="arDesc" class="input" maxlength="72" placeholder="e.g. Send / track / inquire about parcels" style="margin-bottom:6px;">
         <div class="help">Max 72 chars. Only visible when the welcome menu has 4+ items (list mode). Ignored in button mode.</div>
 
+        <label class="input-label">Conversation flow <span style="color:#94a3b8;font-weight:400;">(optional)</span></label>
+        <select name="flow_kind" id="arFlow" class="input" style="margin-bottom:6px;">
+          <option value="">— Send response text (default) —</option>
+          <option value="booking">🚌 Start booking flow (asks origin → destination → date → bus → seats)</option>
+        </select>
+        <div class="help">When set, tapping this menu item kicks off a multi-step conversation instead of sending the response text. Configure routes &amp; trips on the <a href="{{ url_for('routes_page') }}" style="color:var(--amber);">Routes</a> page first.</div>
+
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px;">
           <label class="toggle-switch">
             <input type="checkbox" name="show_in_menu" id="arInMenu">
@@ -222,6 +253,7 @@ function resetArForm() {
   document.getElementById('arKeywords').value = '';
   document.getElementById('arText').value     = '';
   document.getElementById('arDesc').value     = '';
+  document.getElementById('arFlow').value     = '';
   document.getElementById('arInMenu').checked = false;
   document.getElementById('arOrder').value    = 0;
   document.getElementById('formTitle').textContent = '✨ New Auto-Reply';
@@ -242,6 +274,7 @@ document.addEventListener('click', function(e) {
     document.getElementById('arKeywords').value = ed.dataset.keywords || '';
     document.getElementById('arText').value     = ed.dataset.text     || '';
     document.getElementById('arDesc').value     = ed.dataset.desc     || '';
+    document.getElementById('arFlow').value     = ed.dataset.flow     || '';
     document.getElementById('arInMenu').checked = ed.dataset.menu === '1';
     document.getElementById('arOrder').value    = ed.dataset.order    || 0;
     document.getElementById('formTitle').textContent = '✏ Edit Auto-Reply';

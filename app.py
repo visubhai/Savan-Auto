@@ -841,6 +841,7 @@ def settings():
             "access_token", "phone_number_id", "waba_id", "api_version",
             "delay_between_messages", "max_retries", "cost_per_message",
             "wapsolution_monthly_cost", "business_name",
+            "webhook_url", "webhook_verify_token",
             # WhatsApp tier override (Meta API field sometimes lags the UI)
             "whatsapp_tier_limit_override",
             # Gmail auto-fetch (Review Follow-up)
@@ -907,6 +908,7 @@ def auto_replies():
     )
     welcome_footer    = db.get_setting("welcome_menu_footer", "")
     list_button_label = db.get_setting("welcome_list_button_label", "Choose an option")
+    cooldown_hours    = db.get_setting("welcome_menu_cooldown_hours", "24")
     return render_template(
         "auto_replies.html",
         replies=rows,
@@ -914,6 +916,7 @@ def auto_replies():
         welcome_body=welcome_body,
         welcome_footer=welcome_footer,
         list_button_label=list_button_label,
+        cooldown_hours=cooldown_hours,
     )
 
 
@@ -927,6 +930,14 @@ def auto_replies_save_settings():
     # Only used when the menu has 4+ items (renders as a list message).
     db.set_setting("welcome_list_button_label",
                    (request.form.get("list_button_label", "").strip() or "Choose an option"))
+    # Throttle window (hours). 0 = no throttle (menu on every inbound — spammy);
+    # 24 = once per fresh conversation (recommended).
+    cool_raw = request.form.get("menu_cooldown_hours", "24").strip() or "24"
+    try:
+        cool_int = max(0, int(cool_raw))
+    except ValueError:
+        cool_int = 24
+    db.set_setting("welcome_menu_cooldown_hours", str(cool_int))
     flash("✓ Auto-reply settings updated", "success")
     return redirect(url_for("auto_replies"))
 
@@ -938,11 +949,12 @@ def _parse_reply_form(form):
     text     = form.get("response_text", "").strip()
     desc     = form.get("description", "").strip()
     in_menu  = form.get("show_in_menu") == "on"
+    flow     = form.get("flow_kind", "").strip()
     try:
         order_int = int(form.get("menu_order", "0").strip() or "0")
     except ValueError:
         order_int = 0
-    return label, keywords, text, desc, in_menu, order_int
+    return label, keywords, text, desc, in_menu, order_int, flow
 
 
 def _validate_reply_fields(label, text, desc):
@@ -961,12 +973,13 @@ def _validate_reply_fields(label, text, desc):
 @app.route("/auto-replies/create", methods=["POST"])
 @login_required
 def auto_replies_create():
-    label, keywords, text, desc, in_menu, order_int = _parse_reply_form(request.form)
+    label, keywords, text, desc, in_menu, order_int, flow = _parse_reply_form(request.form)
     err = _validate_reply_fields(label, text, desc)
     if err:
         flash(err, "error")
         return redirect(url_for("auto_replies"))
-    db.create_auto_reply(label, keywords, text, in_menu, order_int, description=desc)
+    db.create_auto_reply(label, keywords, text, in_menu, order_int,
+                          description=desc, flow_kind=flow)
     flash(f"✓ Auto-reply '{label}' added", "success")
     return redirect(url_for("auto_replies"))
 
@@ -974,12 +987,13 @@ def auto_replies_create():
 @app.route("/auto-replies/<int:reply_id>/edit", methods=["POST"])
 @login_required
 def auto_replies_edit(reply_id):
-    label, keywords, text, desc, in_menu, order_int = _parse_reply_form(request.form)
+    label, keywords, text, desc, in_menu, order_int, flow = _parse_reply_form(request.form)
     err = _validate_reply_fields(label, text, desc)
     if err:
         flash(err, "error")
         return redirect(url_for("auto_replies"))
-    db.update_auto_reply(reply_id, label, keywords, text, in_menu, order_int, description=desc)
+    db.update_auto_reply(reply_id, label, keywords, text, in_menu, order_int,
+                          description=desc, flow_kind=flow)
     flash("✓ Auto-reply updated", "success")
     return redirect(url_for("auto_replies"))
 
@@ -1000,6 +1014,160 @@ def auto_replies_delete(reply_id):
     db.delete_auto_reply(reply_id)
     flash("Auto-reply deleted", "success")
     return redirect(url_for("auto_replies"))
+
+
+# ---------------- Routes & bus trips (data for the booking flow) ----------------
+
+@app.route("/routes")
+@login_required
+def routes_page():
+    routes = db.list_routes()
+    # Eagerly load trips so the template can render route + its trips inline.
+    for r in routes:
+        r["trips"] = db.list_trips_for_route(r["id"], active_only=False)
+    return render_template("routes.html", routes=routes)
+
+
+@app.route("/routes/create", methods=["POST"])
+@login_required
+def routes_create():
+    origin      = request.form.get("origin", "").strip()
+    destination = request.form.get("destination", "").strip()
+    if not origin or not destination:
+        flash("Origin and destination are required", "error")
+        return redirect(url_for("routes_page"))
+    db.create_route(origin, destination)
+    flash(f"✓ Route '{origin} → {destination}' added", "success")
+    return redirect(url_for("routes_page"))
+
+
+@app.route("/routes/<int:route_id>/edit", methods=["POST"])
+@login_required
+def routes_edit(route_id):
+    origin      = request.form.get("origin", "").strip()
+    destination = request.form.get("destination", "").strip()
+    active      = request.form.get("active") == "on"
+    if not origin or not destination:
+        flash("Origin and destination are required", "error")
+        return redirect(url_for("routes_page"))
+    db.update_route(route_id, origin, destination, active)
+    flash("✓ Route updated", "success")
+    return redirect(url_for("routes_page"))
+
+
+@app.route("/routes/<int:route_id>/delete", methods=["POST"])
+@login_required
+def routes_delete(route_id):
+    db.delete_route(route_id)
+    flash("Route deleted (along with its trips)", "success")
+    return redirect(url_for("routes_page"))
+
+
+@app.route("/routes/<int:route_id>/trips/create", methods=["POST"])
+@login_required
+def trips_create(route_id):
+    departure_time = request.form.get("departure_time", "").strip()
+    bus_type       = request.form.get("bus_type", "").strip()
+    fare           = request.form.get("fare", "0").strip()
+    try:
+        fare_int = int(fare)
+    except ValueError:
+        flash("Fare must be a number", "error")
+        return redirect(url_for("routes_page"))
+    if not departure_time:
+        flash("Departure time is required (HH:MM)", "error")
+        return redirect(url_for("routes_page"))
+    db.create_trip(route_id, departure_time, bus_type, fare_int)
+    flash("✓ Trip added", "success")
+    return redirect(url_for("routes_page"))
+
+
+@app.route("/trips/<int:trip_id>/edit", methods=["POST"])
+@login_required
+def trips_edit(trip_id):
+    departure_time = request.form.get("departure_time", "").strip()
+    bus_type       = request.form.get("bus_type", "").strip()
+    fare           = request.form.get("fare", "0").strip()
+    active         = request.form.get("active") == "on"
+    try:
+        fare_int = int(fare)
+    except ValueError:
+        flash("Fare must be a number", "error")
+        return redirect(url_for("routes_page"))
+    db.update_trip(trip_id, departure_time, bus_type, fare_int, active)
+    flash("✓ Trip updated", "success")
+    return redirect(url_for("routes_page"))
+
+
+@app.route("/trips/<int:trip_id>/delete", methods=["POST"])
+@login_required
+def trips_delete(trip_id):
+    db.delete_trip(trip_id)
+    flash("Trip deleted", "success")
+    return redirect(url_for("routes_page"))
+
+
+# ---------------- Bookings (from the booking flow) ----------------
+
+@app.route("/bookings")
+@login_required
+def bookings_page():
+    status = request.args.get("status", "").strip() or None
+    rows   = db.list_bookings(status=status, limit=300)
+    return render_template("bookings.html", bookings=rows, status_filter=status)
+
+
+@app.route("/bookings/<int:booking_id>/confirm", methods=["POST"])
+@login_required
+def bookings_confirm(booking_id):
+    bk = db.get_booking(booking_id)
+    if not bk:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    db.update_booking_status(booking_id, "confirmed",
+                              notes=request.form.get("notes", "").strip() or None)
+    # Notify the customer
+    api = WhatsAppAPI()
+    if api.is_configured() and bk.get("phone"):
+        msg = (
+            f"✅ *Booking Confirmed*\n\n"
+            f"PNR: {bk['pnr']}\n"
+            f"{bk['origin']} → {bk['destination']}\n"
+            f"Date: {bk.get('travel_date') or '—'}\n"
+            f"Departure: {bk.get('departure_time') or '—'}\n"
+            f"Bus: {bk.get('bus_type') or '—'}\n"
+            f"Seats: {bk['seats']}  •  Total: ₹{bk['total_fare']}\n\n"
+            f"Reach pickup point 15 min before departure.\n"
+            f"Questions: ☎ +91-7567529300"
+        )
+        ok, result = api.send_text(bk["phone"], msg)
+        if ok:
+            db.save_chat_message(bk["phone"], None, "out", msg,
+                                  wa_message_id=result, message_type="text")
+    return redirect(url_for("bookings_page"))
+
+
+@app.route("/bookings/<int:booking_id>/cancel", methods=["POST"])
+@login_required
+def bookings_cancel(booking_id):
+    bk = db.get_booking(booking_id)
+    if not bk:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    db.update_booking_status(booking_id, "cancelled",
+                              notes=request.form.get("notes", "").strip() or None)
+    api = WhatsAppAPI()
+    if api.is_configured() and bk.get("phone"):
+        msg = (
+            f"❌ *Booking Cancelled*\n\n"
+            f"PNR: {bk['pnr']}\n"
+            f"{bk['origin']} → {bk['destination']}\n\n"
+            f"Reason: {request.form.get('notes', '').strip() or 'No seats available / unable to confirm'}\n\n"
+            f"Sorry for the inconvenience. Call us if you'd like alternatives: ☎ +91-7567529300"
+        )
+        ok, result = api.send_text(bk["phone"], msg)
+        if ok:
+            db.save_chat_message(bk["phone"], None, "out", msg,
+                                  wa_message_id=result, message_type="text")
+    return redirect(url_for("bookings_page"))
 
 
 # ---------------- Team (users) ----------------
@@ -1476,6 +1644,47 @@ def campaigns_extract():
 
 # ---------------- Webhook (incoming WhatsApp messages) ----------------
 
+def _dispatch_inbound(phone, msg, content, customer_name=None):
+    """Top-level inbound router. Order:
+      1. If a booking session is active → let the booking flow handle it.
+      2. If the inbound is a button/list tap matching an auto-reply marked
+         with flow_kind='booking' → start the booking flow.
+      3. If the inbound text matches a keyword auto-reply with that flow_kind
+         → start the booking flow.
+      4. Otherwise → fall through to the existing auto-reply dispatcher.
+    """
+    import booking_flow
+    api = WhatsAppAPI()
+    if not api.is_configured():
+        return
+
+    # 1. Mid-flow?
+    if booking_flow.handle(api, phone, msg, content, customer_name=customer_name):
+        return
+
+    # 2 & 3. Did the inbound trigger an auto-reply tagged as a flow starter?
+    selected_label = None
+    msg_type = msg.get("type", "text")
+    if msg_type == "interactive":
+        inter = msg.get("interactive", {}) or {}
+        if inter.get("type") == "button_reply":
+            selected_label = inter.get("button_reply", {}).get("title", "")
+        elif inter.get("type") == "list_reply":
+            selected_label = inter.get("list_reply", {}).get("title", "")
+    elif msg_type == "button":
+        selected_label = msg.get("button", {}).get("text", "")
+
+    trigger_text = selected_label if selected_label else (content if msg_type == "text" else None)
+    if trigger_text:
+        match = db.find_auto_reply_by_text(trigger_text)
+        if match and match.get("flow_kind") == "booking":
+            booking_flow.start(api, phone, customer_name=customer_name)
+            return
+
+    # 4. Fall back to the existing welcome-menu / FAQ dispatcher.
+    _dispatch_auto_reply(phone, msg, content)
+
+
 def _dispatch_auto_reply(phone, msg, content):
     """Decide what (if anything) to auto-send back to a customer who just
     messaged us, then send it. Logged in the inbox like any outbound message.
@@ -1536,6 +1745,22 @@ def _dispatch_auto_reply(phone, msg, content):
 
     menu = db.get_menu_button_replies()
     if not menu:
+        return
+
+    # ── Throttle: send the welcome menu only at the start of a fresh
+    # conversation. If we've sent ANYTHING to this customer (auto-reply,
+    # manual operator message, template, booking confirmation…) within the
+    # cooldown window, stay silent — they already have the menu scrolled up
+    # and don't need a second copy with every "thanks" they type.
+    try:
+        cooldown_h = int(db.get_setting("welcome_menu_cooldown_hours", "24") or 24)
+    except ValueError:
+        cooldown_h = 24
+    if cooldown_h > 0 and db.count_recent_outbound(phone, cooldown_h) > 0:
+        app.logger.info(
+            f"welcome menu suppressed for {phone}: outbound sent within "
+            f"last {cooldown_h}h (mid-conversation)"
+        )
         return
 
     body_text = db.get_setting(
@@ -1700,19 +1925,14 @@ def webhook_receive():
                         raw_payload=raw_payload,
                     )
 
-                    # ── Auto-reply (if enabled in settings) ────────────────
-                    # Behavior:
-                    #   • inbound is a button/list reply → send the FAQ text
-                    #     mapped to that label
-                    #   • inbound is text matching a configured keyword → send
-                    #     that FAQ text
-                    #   • otherwise → send the welcome menu with up to 3
-                    #     quick-reply buttons
+                    # ── Auto-reply + booking-flow dispatch ─────────────────
+                    # Order: active booking flow > flow-starter auto-reply >
+                    #        keyword/menu auto-reply. See _dispatch_inbound.
                     if db.get_setting("auto_reply_enabled", "0") == "1":
                         try:
-                            _dispatch_auto_reply(phone, msg, content)
+                            _dispatch_inbound(phone, msg, content, customer_name=name)
                         except Exception as e:
-                            app.logger.error(f"Auto-reply dispatch failed: {e}")
+                            app.logger.error(f"Inbound dispatch failed: {e}")
 
                 # ── Status updates (sent → delivered → read) ───────────────
                 for st in value.get("statuses", []):
