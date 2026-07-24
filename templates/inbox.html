@@ -404,15 +404,16 @@ if (ACTIVE_PHONE) {
   checkWindow();
   // Adaptive polling: fast when activity, slow when idle, paused when tab hidden.
   // Saves ~70% of inbox poll traffic on busy days.
-  var POLL_FAST = 3000;     // active conversation, recent activity
-  var POLL_SLOW = 12000;    // no new messages for a while
-  var IDLE_AFTER = 60000;   // 60s without a new message → slow down
+  var POLL_FAST = 1500;     // active conversation, recent activity (1.5s)
+  var POLL_SLOW = 5000;     // no new messages for a while (5s)
+  var IDLE_AFTER = 30000;   // 30s without a new message → slow down
   var lastActivity = Date.now();
   function currentInterval() {
     if (document.hidden) return null;                    // pause entirely
     return (Date.now() - lastActivity < IDLE_AFTER) ? POLL_FAST : POLL_SLOW;
   }
   function pollOnce() {
+    clearTimeout(pollTimer);
     if (!document.hidden) {
       var prev = lastMsgId;
       pollMessages();
@@ -425,7 +426,11 @@ if (ACTIVE_PHONE) {
   pollTimer = setTimeout(pollOnce, POLL_FAST);
   // Resume fast polling immediately when user comes back to the tab
   document.addEventListener('visibilitychange', function() {
-    if (!document.hidden) { lastActivity = Date.now(); pollOnce(); }
+    if (!document.hidden) {
+      clearTimeout(pollTimer);
+      lastActivity = Date.now();
+      pollOnce();
+    }
   });
   // Any click / typing inside the chat is "activity"
   document.getElementById('chatMessages')?.addEventListener('click',   function(){ lastActivity = Date.now(); });
@@ -438,6 +443,22 @@ function sendMessage() {
   var text  = input.value.trim();
   if (!text || !ACTIVE_PHONE) return;
 
+  // Optimistic UI update: append bubble immediately
+  var tempId = 'temp-' + Date.now();
+  var timestamp = new Date(Date.now() + 330*60000).toISOString().replace('T',' ').substr(0,19);
+  
+  appendBubble({
+    id: tempId,
+    direction: 'out',
+    content: text,
+    timestamp: timestamp,
+    status: 'sending'
+  });
+  
+  // Clear input box immediately
+  input.value = '';
+  input.style.height = '';
+  
   var btn = document.getElementById('sendBtn');
   btn.disabled = true;
   btn.textContent = '…';
@@ -450,19 +471,31 @@ function sendMessage() {
   .then(function(r){ return r.json(); })
   .then(function(data) {
     if (data.ok) {
-      input.value = '';
-      input.style.height = '';
-      appendBubble({ id: data.id, direction: 'out', content: text,
-                     timestamp: new Date(Date.now() + 330*60000).toISOString().replace('T',' ').substr(0,19),
-                     status: 'sent' });
+      // Find the temporary bubble and update it with the actual message ID and sent status
+      var row = document.querySelector('[data-id="' + tempId + '"]');
+      if (row) {
+        row.dataset.id = data.id;
+        var timeSpan = row.querySelector('.bubble-time');
+        if (timeSpan) {
+          timeSpan.innerHTML = timestamp.substr(11, 5) + ' ✓';
+        }
+      }
       lastMsgId = data.id;
     } else {
+      // Remove temporary bubble and restore input if it failed
+      var row = document.querySelector('[data-id="' + tempId + '"]');
+      if (row) row.remove();
+      input.value = text;
       alert('Failed to send: ' + data.error);
     }
     btn.disabled = false;
     btn.textContent = 'Send ➤';
   })
   .catch(function(e) {
+    // Remove temporary bubble and restore input if it failed
+    var row = document.querySelector('[data-id="' + tempId + '"]');
+    if (row) row.remove();
+    input.value = text;
     alert('Error: ' + e.message);
     btn.disabled = false;
     btn.textContent = 'Send ➤';

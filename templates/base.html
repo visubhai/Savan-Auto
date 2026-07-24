@@ -390,7 +390,7 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
 </script>
 {% block scripts %}{% endblock %}
 <script>
-// Poll for unread inbox messages every 8 seconds (shown as badge in sidebar)
+// Poll for unread inbox messages every 3 seconds (shown as badge in sidebar)
 (function() {
   var badge = document.getElementById('inboxBadge');
   if (!badge) return;
@@ -402,7 +402,7 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
     }).catch(function(){});
   }
   pollUnread();
-  setInterval(pollUnread, 8000);
+  setInterval(pollUnread, 3000);
 })();
 </script>
 </body>
