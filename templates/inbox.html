@@ -677,6 +677,92 @@ function sendTemplateFromInbox() {
   });
 }
 
+/* ── Live Updates of Conversation List ── */
+function renderConvosList(conversations) {
+  var container = document.getElementById('convListBody');
+  if (!container) return;
+  
+  if (!conversations || conversations.length === 0) {
+    container.innerHTML = '<div class="conv-empty">No conversations yet.<br>Messages from customers will appear here.</div>';
+    return;
+  }
+  
+  var searchInput = document.getElementById('convSearch');
+  var ql = (searchInput ? searchInput.value : '').toLowerCase();
+  
+  var html = '';
+  conversations.forEach(function(c) {
+    var name = c.customer_name || c.phone;
+    var nameLower = name.toLowerCase();
+    var phoneLower = c.phone.toLowerCase();
+    
+    // Check search query match
+    var searchMatch = !ql || nameLower.includes(ql) || phoneLower.includes(ql);
+    
+    // Check tab filter match
+    var filterMatch = true;
+    var isWindowOpen = c.window_open ? '1' : '0';
+    var isUnread = (c.unread && c.unread > 0) ? '1' : '0';
+    
+    if (CURRENT_FILTER === 'open') {
+      filterMatch = isWindowOpen === '1';
+    } else if (CURRENT_FILTER === 'unread') {
+      filterMatch = isUnread === '1';
+    }
+    
+    var isVisible = searchMatch && filterMatch;
+    var displayStyle = isVisible ? '' : 'style="display:none;"';
+    
+    var activeClass = (String(c.phone).toLowerCase() === String(ACTIVE_PHONE || '').toLowerCase()) ? 'active' : '';
+    
+    var directionIndicator = c.direction === 'out' ? '↗ ' : '';
+    var previewText = c.content || '';
+    if (previewText.length > 45) {
+      previewText = previewText.substr(0, 45) + '…';
+    }
+    
+    var badgeHtml = (c.unread && c.unread > 0) ? '<div class="conv-badge">' + c.unread + '</div>' : '';
+    var timeHtml = c.formatted_time || '';
+    
+    html += '<a href="/inbox?phone=' + encodeURIComponent(c.phone) + '" ' +
+            'class="conv-item ' + activeClass + '" ' +
+            'data-name="' + escHtml(nameLower) + '" ' +
+            'data-phone="' + escHtml(phoneLower) + '" ' +
+            'data-window-open="' + isWindowOpen + '" ' +
+            'data-unread="' + isUnread + '" ' +
+            displayStyle + '>' +
+            '  <div class="conv-avatar">👤</div>' +
+            '  <div class="conv-meta">' +
+            '    <div class="conv-name">' + escHtml(name) + '</div>' +
+            '    <div class="conv-preview">' + directionIndicator + escHtml(previewText) + '</div>' +
+            '  </div>' +
+            '  <div class="conv-right">' +
+            '    <div class="conv-time">' + escHtml(timeHtml) + '</div>' +
+            '    ' + badgeHtml +
+            '  </div>' +
+            '  <button type="button" class="conv-del" ' +
+            '          data-phone="' + escHtml(c.phone) + '" ' +
+            '          data-name="' + escHtml(name) + '" ' +
+            '          title="Delete this conversation">🗑</button>' +
+            '</a>';
+  });
+  
+  container.innerHTML = html;
+}
+
+function pollConversationsList() {
+  if (document.hidden) return;
+  fetch('/api/inbox/conversations')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      renderConvosList(data);
+    })
+    .catch(function() {});
+}
+
+// Poll conversation list updates every 3 seconds
+setInterval(pollConversationsList, 3000);
+
 /* ── Delete-conversation handlers ─────────────────────────────────────
    Hard-deletes every message with one phone number. Used from two places:
      1. trash icon on each row in the conversation list

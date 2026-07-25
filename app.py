@@ -2334,6 +2334,31 @@ def inbox_unread():
     return jsonify({"count": db.get_unread_count()})
 
 
+@app.route("/api/inbox/conversations")
+@login_required
+def api_inbox_conversations():
+    conversations = db.list_conversations(50)
+    conversations = [dict(c) for c in conversations]
+    
+    from datetime import datetime, timedelta, timezone
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_naive = datetime.now(IST).replace(tzinfo=None)
+    
+    for c in conversations:
+        lit = c.get("last_inbound_timestamp")
+        c["window_open"] = False
+        if lit:
+            try:
+                lit_dt = datetime.strptime(str(lit)[:19], "%Y-%m-%d %H:%M:%S")
+                if now_naive - lit_dt < timedelta(hours=24):
+                    c["window_open"] = True
+            except Exception:
+                pass
+        c["formatted_time"] = inbox_time_or_date_filter(c.get("timestamp"))
+        
+    return jsonify(conversations)
+
+
 @app.route("/api/inbox/<phone>/delete", methods=["POST"])
 @login_required
 def inbox_delete_conversation(phone):
