@@ -115,6 +115,7 @@ def init_db():
             status TEXT NOT NULL DEFAULT 'pending',
             error_message TEXT,
             wa_message_id TEXT,
+            params TEXT,
             sent_at TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now', '+330 minutes')),
             FOREIGN KEY (batch_id) REFERENCES batches(id)
@@ -257,6 +258,10 @@ def init_db():
         cols = {r["name"] for r in db.execute("PRAGMA table_info(scheduled_jobs)").fetchall()}
         if "var_overrides" not in cols:
             db.execute("ALTER TABLE scheduled_jobs ADD COLUMN var_overrides TEXT DEFAULT ''")
+        
+        cols_msgs = {r["name"] for r in db.execute("PRAGMA table_info(messages)").fetchall()}
+        if "params" not in cols_msgs:
+            db.execute("ALTER TABLE messages ADD COLUMN params TEXT")
 
     # Migration: add media columns to older chats tables
     with get_db() as db:
@@ -577,15 +582,17 @@ def list_batches(limit=50):
 
 
 def log_message(batch_id, phone, name, route, platform, template_name,
-                status, error=None, wa_msg_id=None):
+                status, error=None, wa_msg_id=None, params=None):
     with get_db() as db:
+        import json
+        params_json = json.dumps(params) if params else None
         db.execute(
             """INSERT INTO messages (batch_id, customer_phone, customer_name,
                route, platform, template_name, status, error_message,
-               wa_message_id, sent_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+330 minutes'))""",
+               wa_message_id, params, sent_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+330 minutes'))""",
             (batch_id, phone, name, route, platform, template_name,
-             status, error, wa_msg_id),
+             status, error, wa_msg_id, params_json),
         )
 
 
@@ -851,7 +858,8 @@ def list_conversations(limit=50):
         return db.execute(
             """SELECT c.phone, c.customer_name, c.content, c.direction,
                       c.timestamp, c.message_type,
-                      SUM(CASE WHEN c.read=0 AND c.direction='in' THEN 1 ELSE 0 END) as unread
+                      SUM(CASE WHEN c.read=0 AND c.direction='in' THEN 1 ELSE 0 END) as unread,
+                      (SELECT MAX(timestamp) FROM chats WHERE phone=c.phone AND direction='in') as last_inbound_timestamp
                FROM chats c
                INNER JOIN (
                    SELECT phone, MAX(timestamp) as max_ts FROM chats GROUP BY phone
@@ -904,6 +912,10 @@ def update_chat_status(wa_message_id, status):
     with get_db() as db:
         db.execute(
             "UPDATE chats SET status=? WHERE wa_message_id=?",
+            (status, wa_message_id),
+        )
+        db.execute(
+            "UPDATE messages SET status=? WHERE wa_message_id=?",
             (status, wa_message_id),
         )
 

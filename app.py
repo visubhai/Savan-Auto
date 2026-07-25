@@ -96,35 +96,36 @@ _MIME_EXT = {
 }
 
 
-def render_template_body(body, name=None, route=None, platform=None, extra=None, template_name=None):
-    """Substitute {{1}}, {{2}}, {{3}}, … in a WhatsApp template body.
-
-    Mapping varies by template type — must mirror scheduler.send_batch:
-      • Follow-up templates (name contains "follow"): {{1}}=platform,
-        {{2}}=name, {{3}}=route
-      • All other templates:                          {{1}}=name,
-        {{2}}=route, {{3}}=platform
-
-    `extra` is a dict of {position_str: value} for any higher-indexed
-    variables (e.g. fixed campaign values) — used opportunistically;
-    unknown placeholders are left as-is.
-    """
+def render_template_body(body, name=None, route=None, platform=None, extra=None, template_name=None, params=None):
+    """Substitute {{1}}, {{2}}, {{3}}, … in a WhatsApp template body."""
     if not body:
         return ""
     import re
-    is_followup = bool(template_name and "follow" in template_name.lower())
-    if is_followup:
-        subs = {
-            "1": (platform or "the platform"),
-            "2": (name or "Customer"),
-            "3": (route or "your journey"),
-        }
-    else:
-        subs = {
-            "1": (name or "Customer"),
-            "2": (route or "your journey"),
-            "3": (platform or "the platform"),
-        }
+    subs = {}
+    if params:
+        if isinstance(params, str):
+            try:
+                import json
+                params = json.loads(params)
+            except Exception:
+                params = []
+        if isinstance(params, list):
+            subs = {str(i + 1): str(val) for i, val in enumerate(params)}
+            
+    if not subs:
+        is_followup = bool(template_name and "follow" in template_name.lower())
+        if is_followup:
+            subs = {
+                "1": (platform or "the platform"),
+                "2": (name or "Customer"),
+                "3": (route or "your journey"),
+            }
+        else:
+            subs = {
+                "1": (name or "Customer"),
+                "2": (route or "your journey"),
+                "3": (platform or "the platform"),
+            }
     if extra:
         for k, v in extra.items():
             if v:
@@ -144,13 +145,74 @@ def _ext_for_mime(mime):
     import mimetypes
     return mimetypes.guess_extension(base) or ".bin"
 
-# Custom Jinja filters
 @app.template_filter("from_json")
 def from_json_filter(s):
     try:
         return json.loads(s)
     except Exception:
         return []
+
+
+@app.template_filter("inbox_date")
+def format_inbox_date_filter(s):
+    if not s:
+        return ""
+    day_str = str(s)[:10]
+    try:
+        from datetime import datetime, timedelta, timezone
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(IST)
+        today = now.date()
+        yesterday = today - timedelta(days=1)
+        
+        target_date = datetime.strptime(day_str, "%Y-%m-%d").date()
+        
+        if target_date == today:
+            return "Today"
+        elif target_date == yesterday:
+            return "Yesterday"
+        elif today - target_date < timedelta(days=7) and today - target_date > timedelta(days=0):
+            return target_date.strftime("%A")
+        else:
+            return target_date.strftime("%d %b %Y")
+    except Exception:
+        return day_str
+
+
+@app.template_filter("inbox_time_or_date")
+def inbox_time_or_date_filter(s):
+    if not s:
+        return ""
+    try:
+        from datetime import datetime, timedelta, timezone
+        s_str = str(s)[:19]
+        if len(s_str) >= 19:
+            dt = datetime.strptime(s_str, "%Y-%m-%d %H:%M:%S")
+        elif len(s_str) >= 10:
+            dt = datetime.strptime(s_str[:10], "%Y-%m-%d")
+        else:
+            raise ValueError("Invalid format")
+            
+        IST = timezone(timedelta(hours=5, minutes=30))
+        now = datetime.now(IST)
+        today = now.date()
+        yesterday = today - timedelta(days=1)
+        
+        target_date = dt.date()
+        
+        if target_date == today:
+            return dt.strftime("%H:%M")
+        elif target_date == yesterday:
+            return "Yesterday"
+        elif today - target_date < timedelta(days=7) and today - target_date > timedelta(days=0):
+            return target_date.strftime("%A")
+        else:
+            return target_date.strftime("%d/%m/%y")
+    except Exception:
+        s_str = str(s)
+        if len(s_str) >= 16:
+            return s_str[11:16]
+        return s_str
 
 # Initialize DB on startup
 db.init_db()
@@ -1820,7 +1882,52 @@ def webhook_receive():
     try:
         for entry in data.get("entry", []):
             for change in entry.get("changes", []):
+                field = change.get("field", "messages")
                 value = change.get("value", {})
+
+                # ── Handle Template Status Updates ─────────────────────────
+                if field == "message_template_status_update":
+                    name = value.get("message_template_name")
+                    event = value.get("event")
+                    if name and event:
+                        status_map = {
+                            "APPROVED": "approved",
+                            "REJECTED": "rejected",
+                            "PENDING": "pending",
+                            "PAUSED": "paused",
+                            "DISABLED": "disabled"
+                        }
+                        new_status = status_map.get(event.upper(), event.lower())
+                        db.update_template_meta(name, status=new_status)
+                        app.logger.info(f"Webhook template status update: {name} -> {new_status} (Event: {event})")
+                    continue
+
+                # ── Handle Phone Number Quality Updates ────────────────────
+                elif field == "phone_number_quality_update":
+                    phone = value.get("display_phone_number")
+                    event = value.get("event")
+                    limit = value.get("current_limit")
+                    app.logger.warning(f"Webhook phone quality update for {phone}: event={event}, limit={limit}")
+                    continue
+
+                # ── Handle Phone Display Name Updates ──────────────────────
+                elif field == "phone_number_name_update":
+                    phone = value.get("display_phone_number")
+                    decision = value.get("decision")
+                    name = value.get("requested_verified_name")
+                    app.logger.info(f"Webhook display name update for {phone}: name={name}, decision={decision}")
+                    continue
+
+                # ── Handle WABA Account Updates ────────────────────────────
+                elif field == "account_update":
+                    event = value.get("event")
+                    phone = value.get("phone_number")
+                    ban_info = value.get("ban_info", {})
+                    app.logger.warning(
+                        f"Webhook account update: event={event}, phone={phone}, "
+                        f"ban_info={ban_info}"
+                    )
+                    continue
 
                 # ── Incoming messages ──────────────────────────────────────
                 for msg in value.get("messages", []):
@@ -1988,6 +2095,7 @@ def inbox():
                 route=b.get("route"),
                 platform=b.get("platform"),
                 template_name=tname,
+                params=b.get("params"),
             )
             content = rendered or f"📋 Sent template: {tname}"
             messages.append({
@@ -2024,8 +2132,104 @@ def inbox():
             last_chat_id = mid
 
     conversations = [dict(c) for c in conversations]
+    
+    from datetime import datetime, timedelta, timezone
+    IST = timezone(timedelta(hours=5, minutes=30))
+    now_naive = datetime.now(IST).replace(tzinfo=None)
+    
+    for c in conversations:
+        lit = c.get("last_inbound_timestamp")
+        c["window_open"] = False
+        if lit:
+            try:
+                lit_dt = datetime.strptime(str(lit)[:19], "%Y-%m-%d %H:%M:%S")
+                if now_naive - lit_dt < timedelta(hours=24):
+                    c["window_open"] = True
+            except Exception:
+                pass
+
     return render_template("inbox.html",
                            conversations=conversations,
+                           active_phone=active_phone,
+                           messages=messages,
+                           customer_name=customer_name,
+                           templates=templates,
+                           last_chat_id=last_chat_id)
+
+
+@app.route("/inbox/chat/<phone>")
+@login_required
+def inbox_chat_pane(phone):
+    if phone == "none" or not phone.strip():
+        return render_template("inbox_chat_pane.html", active_phone="", messages=[], customer_name="", templates=[], last_chat_id=0)
+
+    from parsers import clean_phone as _cp
+    cleaned = _cp(phone)
+    active_phone = cleaned or phone
+
+    templates = [dict(t) for t in db.get_templates()]
+    messages      = []
+    customer_name = ""
+
+    chats = [dict(m) for m in db.get_conversation(active_phone, 50)]
+    for m in chats:
+        if (m.get("message_type") == "reaction"
+            and (not m.get("content") or m.get("content") == "[reaction]")
+            and m.get("raw_payload")):
+            try:
+                rp = json.loads(m["raw_payload"])
+                em = ((rp.get("reaction") or {}).get("emoji") or "").strip()
+                m["content"] = f"{em} (reacted)" if em else "(reaction removed)"
+            except Exception:
+                pass
+
+    bulk  = [dict(m) for m in db.get_phone_messages(active_phone, 50)]
+    bodies = {t["name"]: t.get("body", "") for t in templates}
+    for b in bulk:
+        tname = b.get("template_name", "")
+        rendered = render_template_body(
+            bodies.get(tname, ""),
+            name=b.get("customer_name"),
+            route=b.get("route"),
+            platform=b.get("platform"),
+            template_name=tname,
+        )
+        content = rendered or f"📋 Sent template: {tname}"
+        messages.append({
+            "id": f"b{b.get('id')}",
+            "direction": "out",
+            "content": content,
+            "timestamp": b.get("sent_at"),
+            "status": b.get("status"),
+            "customer_name": b.get("customer_name"),
+            "message_type": "template",
+            "template_name": tname,
+            "is_bulk": True,
+        })
+
+    for c in chats:
+        c["is_bulk"] = False
+        messages.append(c)
+
+    messages.sort(key=lambda m: m.get("timestamp") or "")
+    db.mark_read(active_phone)
+
+    for m in reversed(messages):
+        n = m.get("customer_name")
+        if n:
+            customer_name = n
+            break
+
+    if not customer_name:
+        customer_name = active_phone
+
+    last_chat_id = 0
+    for m in messages:
+        mid = m.get("id")
+        if isinstance(mid, int) and mid > last_chat_id:
+            last_chat_id = mid
+
+    return render_template("inbox_chat_pane.html",
                            active_phone=active_phone,
                            messages=messages,
                            customer_name=customer_name,

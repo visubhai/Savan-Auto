@@ -446,7 +446,7 @@ else:
     # ── Messages ──────────────────────────────────────────────────────────────
 
     def log_message(batch_id, phone, name, route, platform, template_name,
-                    status, error=None, wa_msg_id=None):
+                    status, error=None, wa_msg_id=None, params=None):
         _db().messages.insert_one({
             "id": _next_id("messages"),
             "batch_id": int(batch_id),
@@ -458,6 +458,7 @@ else:
             "status": status,
             "error_message": error,
             "wa_message_id": wa_msg_id,
+            "params": params,
             "sent_at": _now(),
             "created_at": _now(),
         })
@@ -734,6 +735,15 @@ else:
                         ]
                     }
                 },
+                "last_inbound_timestamp": {
+                    "$max": {
+                        "$cond": [
+                            {"$eq": ["$direction", "in"]},
+                            "$timestamp",
+                            None
+                        ]
+                    }
+                },
             }},
             {"$sort": {"timestamp": DESCENDING}},
             {"$limit": limit},
@@ -768,6 +778,10 @@ else:
 
     def update_chat_status(wa_message_id, status):
         _db().chats.update_one(
+            {"wa_message_id": wa_message_id},
+            {"$set": {"status": status}},
+        )
+        _db().messages.update_one(
             {"wa_message_id": wa_message_id},
             {"$set": {"status": status}},
         )

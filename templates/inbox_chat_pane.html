@@ -1,0 +1,101 @@
+{% if active_phone %}
+  <!-- Header -->
+  <div class="chat-header">
+    <a href="{{ url_for('inbox') }}" class="inbox-back" title="Back to conversation list" aria-label="Back">←</a>
+    <div>
+      <div class="chat-title">{{ customer_name or active_phone }}</div>
+      <div class="chat-phone">+{{ active_phone }}</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+      <span class="window-badge" id="windowBadge">Checking…</span>
+      <button type="button" id="headerDelete"
+              data-phone="{{ active_phone }}"
+              data-name="{{ customer_name or active_phone }}"
+              style="background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;"
+              title="Delete this conversation">🗑 Delete chat</button>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="chat-messages" id="chatMessages">
+    {% set ns = namespace(last_date='') %}
+    {% for m in messages %}
+      {% set day = m.timestamp[:10] if m.timestamp else '' %}
+      {% if day != ns.last_date %}
+        <div class="msg-date-sep">── {{ day|inbox_date }} ──</div>
+        {% set ns.last_date = day %}
+      {% endif %}
+      <div class="msg-row {{ m.direction }}{% if m.is_bulk %} bulk{% endif %}" data-id="{{ m.id }}">
+        <div class="bubble">
+          {% if m.media_path %}
+            {% if m.message_type in ['image', 'sticker'] %}
+              <a href="{{ url_for('serve_media', chat_id=m.id) }}" target="_blank">
+                <img src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-img" loading="lazy" decoding="async">
+              </a>
+              {% if m.content and not m.content.startswith('[') %}
+                <div class="bubble-caption">{{ m.content }}</div>
+              {% endif %}
+            {% elif m.message_type == 'audio' %}
+              <audio controls preload="none" src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-audio"></audio>
+            {% elif m.message_type == 'video' %}
+              <video controls preload="none" src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-video"></video>
+            {% elif m.message_type == 'document' %}
+              <a href="{{ url_for('serve_media', chat_id=m.id) }}" target="_blank" class="bubble-doc">
+                📄 {{ m.filename or 'Document' }}
+              </a>
+            {% else %}
+              {{ m.content }}
+            {% endif %}
+          {% else %}
+            {{ m.content }}
+          {% endif %}
+          <span class="bubble-time">
+            {{ m.timestamp[11:16] if m.timestamp else '' }}
+            {% if m.direction == 'out' %}
+              &nbsp;{% if m.status == 'read' %}<span style="color:#34b7f1;font-weight:bold;">✓✓</span>{% elif m.status == 'delivered' %}<span style="color:#94a3b8;">✓✓</span>{% elif m.status == 'sent' %}<span style="color:#94a3b8;">✓</span>{% elif m.status == 'failed' %}<span style="color:#dc2626;font-weight:bold;">✗</span>{% else %}<span style="color:#94a3b8;">⏳</span>{% endif %}
+            {% endif %}
+          </span>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <!-- 24h window warning -->
+  <div class="window-warn" id="windowWarn" style="display:none;">
+    ⚠ 24-hour window closed — customer hasn't messaged in 24 hours. Send a template to start a conversation.
+  </div>
+
+  <!-- Template picker (hidden by default) -->
+  <div class="tpl-picker" id="tplPicker" style="display:none;">
+    <div class="tpl-head">
+      <span>📋 Send Template</span>
+      <button type="button" class="tpl-close" onclick="toggleTplPicker(false)">×</button>
+    </div>
+    <select id="tplSelect" onchange="onTplPickerChange()">
+      <option value="">— Select template —</option>
+      {% for t in templates %}
+      <option value="{{ t.name }}" data-vars="{{ t.variable_count or 0 }}">
+        {{ t.name }} {% if t.status == 'approved' %}✓{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    <div id="tplVarFields"></div>
+    <button type="button" class="tpl-send" id="tplSendBtn" onclick="sendTemplateFromInbox()" disabled>Send template</button>
+  </div>
+
+  <!-- Input bar -->
+  <div class="chat-input-bar">
+    <button type="button" class="tpl-btn" title="Send a template" onclick="toggleTplPicker()">📋</button>
+    <textarea id="msgInput" rows="1" placeholder="Type a message…"
+      onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+    <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send ➤</button>
+  </div>
+
+  <div id="chatPaneData" style="display:none;" data-active-phone="{{ active_phone }}" data-last-chat-id="{{ last_chat_id }}"></div>
+{% else %}
+  <div class="chat-placeholder">
+    <div>💬</div>
+    <p>Select a conversation to start chatting</p>
+  </div>
+  <div id="chatPaneData" style="display:none;" data-active-phone="" data-last-chat-id="0"></div>
+{% endif %}

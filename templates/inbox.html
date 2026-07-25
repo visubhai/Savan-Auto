@@ -87,6 +87,30 @@
   .tpl-btn { background:transparent; border:1px solid var(--border); color:#1e293b; border-radius:8px; padding:0 10px; font-size:16px; cursor:pointer; flex-shrink:0; }
   .tpl-btn:hover { background:rgba(15,23,42,0.04); border-color:var(--amber); color:var(--amber); }
 
+  /* Filter buttons in conversation list */
+  .filter-btn {
+    flex: 1;
+    padding: 6px 4px;
+    border: 1px solid var(--border);
+    background: #f8fafc;
+    color: var(--muted);
+    border-radius: 20px;
+    font-size: 11.5px;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover {
+    background: #f1f5f9;
+    color: var(--text);
+  }
+  .filter-btn.active {
+    background: var(--primary-dim);
+    border-color: var(--primary);
+    color: var(--primary-dark);
+  }
+
   /* Mobile: show EITHER the list OR the open chat (WhatsApp pattern). */
   .inbox-back { display:none; }
   @media (max-width: 820px) {
@@ -134,6 +158,12 @@
       <input type="text" id="convSearch" placeholder="Search or type a number to start chat…" oninput="filterConvs(this.value)">
     </div>
 
+    <div class="inbox-filters" style="display:flex;padding:10px 14px;gap:8px;border-bottom:1px solid var(--border);background:#fff;">
+      <button type="button" class="filter-btn active" id="filterBtnAll" onclick="setInboxFilter('all')">All</button>
+      <button type="button" class="filter-btn" id="filterBtnOpen" onclick="setInboxFilter('open')">🟢 Open (24h)</button>
+      <button type="button" class="filter-btn" id="filterBtnUnread" onclick="setInboxFilter('unread')">✉ Unread</button>
+    </div>
+
     <div class="phone-suggest" id="phoneSuggest" style="display:none;"></div>
 
     <div id="convListBody">
@@ -142,7 +172,9 @@
         <a href="{{ url_for('inbox') }}?phone={{ c.phone }}"
            class="conv-item {% if c.phone == active_phone %}active{% endif %}"
            data-name="{{ (c.customer_name or c.phone)|lower }}"
-           data-phone="{{ c.phone|lower }}">
+           data-phone="{{ c.phone|lower }}"
+           data-window-open="{{ '1' if c.window_open else '0' }}"
+           data-unread="{{ '1' if c.unread and c.unread > 0 else '0' }}">
           <div class="conv-avatar">👤</div>
           <div class="conv-meta">
             <div class="conv-name">{{ c.customer_name or c.phone }}</div>
@@ -152,7 +184,7 @@
             </div>
           </div>
           <div class="conv-right">
-            <div class="conv-time">{{ c.timestamp[11:16] if c.timestamp else '' }}</div>
+            <div class="conv-time">{{ c.timestamp|inbox_time_or_date }}</div>
             {% if c.unread and c.unread > 0 %}
               <div class="conv-badge">{{ c.unread }}</div>
             {% endif %}
@@ -173,106 +205,7 @@
 
   <!-- ── Chat window ── -->
   <div class="chat-wrap" id="chatWrap">
-    {% if active_phone %}
-
-      <!-- Header -->
-      <div class="chat-header">
-        <a href="{{ url_for('inbox') }}" class="inbox-back" title="Back to conversation list" aria-label="Back">←</a>
-        <div>
-          <div class="chat-title">{{ customer_name or active_phone }}</div>
-          <div class="chat-phone">+{{ active_phone }}</div>
-        </div>
-        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-          <span class="window-badge" id="windowBadge">Checking…</span>
-          <button type="button" id="headerDelete"
-                  data-phone="{{ active_phone }}"
-                  data-name="{{ customer_name or active_phone }}"
-                  style="background:#fef2f2;border:1px solid #fecaca;color:#dc2626;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;"
-                  title="Delete this conversation">🗑 Delete chat</button>
-        </div>
-      </div>
-
-      <!-- Messages -->
-      <div class="chat-messages" id="chatMessages">
-        {% set ns = namespace(last_date='') %}
-        {% for m in messages %}
-          {% set day = m.timestamp[:10] if m.timestamp else '' %}
-          {% if day != ns.last_date %}
-            <div class="msg-date-sep">── {{ day }} ──</div>
-            {% set ns.last_date = day %}
-          {% endif %}
-          <div class="msg-row {{ m.direction }}{% if m.is_bulk %} bulk{% endif %}" data-id="{{ m.id }}">
-            <div class="bubble">
-              {% if m.media_path %}
-                {% if m.message_type in ['image', 'sticker'] %}
-                  <a href="{{ url_for('serve_media', chat_id=m.id) }}" target="_blank">
-                    <img src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-img" loading="lazy" decoding="async">
-                  </a>
-                  {% if m.content and not m.content.startswith('[') %}
-                    <div class="bubble-caption">{{ m.content }}</div>
-                  {% endif %}
-                {% elif m.message_type == 'audio' %}
-                  <audio controls preload="none" src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-audio"></audio>
-                {% elif m.message_type == 'video' %}
-                  <video controls preload="none" src="{{ url_for('serve_media', chat_id=m.id) }}" class="bubble-video"></video>
-                {% elif m.message_type == 'document' %}
-                  <a href="{{ url_for('serve_media', chat_id=m.id) }}" target="_blank" class="bubble-doc">
-                    📄 {{ m.filename or 'Document' }}
-                  </a>
-                {% else %}
-                  {{ m.content }}
-                {% endif %}
-              {% else %}
-                {{ m.content }}
-              {% endif %}
-              <span class="bubble-time">
-                {{ m.timestamp[11:16] if m.timestamp else '' }}
-                {% if m.direction == 'out' %}
-                  &nbsp;{% if m.status == 'read' %}✓✓{% elif m.status == 'delivered' %}✓✓{% elif m.status == 'sent' %}✓{% elif m.status == 'failed' %}<span style="color:#dc2626;">✗</span>{% else %}⏳{% endif %}
-                {% endif %}
-              </span>
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-
-      <!-- 24h window warning -->
-      <div class="window-warn" id="windowWarn" style="display:none;">
-        ⚠ 24-hour window closed — customer hasn't messaged in 24 hours. Send a template to start a conversation.
-      </div>
-
-      <!-- Template picker (hidden by default) -->
-      <div class="tpl-picker" id="tplPicker" style="display:none;">
-        <div class="tpl-head">
-          <span>📋 Send Template</span>
-          <button type="button" class="tpl-close" onclick="toggleTplPicker(false)">×</button>
-        </div>
-        <select id="tplSelect" onchange="onTplPickerChange()">
-          <option value="">— Select template —</option>
-          {% for t in templates %}
-          <option value="{{ t.name }}" data-vars="{{ t.variable_count or 0 }}">
-            {{ t.name }} {% if t.status == 'approved' %}✓{% endif %}
-          </option>
-          {% endfor %}
-        </select>
-        <div id="tplVarFields"></div>
-        <button type="button" class="tpl-send" id="tplSendBtn" onclick="sendTemplateFromInbox()" disabled>Send template</button>
-      </div>
-
-      <!-- Input bar -->
-      <div class="chat-input-bar">
-        <button type="button" class="tpl-btn" title="Send a template" onclick="toggleTplPicker()">📋</button>
-        <textarea id="msgInput" rows="1" placeholder="Type a message…"
-          onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send ➤</button>
-      </div>
-
-    {% else %}
-      <div class="chat-placeholder">
-        <div>💬</div>
-        <p>Select a conversation to start chatting</p>
-      </div>
-    {% endif %}
+    {% include 'inbox_chat_pane.html' %}
   </div>
 
 </div>
@@ -284,6 +217,101 @@ var ACTIVE_PHONE = {{ (active_phone or '')|tojson }};
 // last_chat_id is the max integer id of real chat messages (bulk-only history → 0)
 var lastMsgId    = {{ last_chat_id|default(0) }};
 var pollTimer    = null;
+
+/* ── Dynamic Conversation Switching without page reload ── */
+function selectConversation(phone) {
+  var items = document.querySelectorAll('.conv-item');
+  items.forEach(function(item) {
+    var p = item.getAttribute('data-phone') || '';
+    if (p.toLowerCase() === String(phone || '').toLowerCase()) {
+      item.classList.add('active');
+    } else {
+      item.classList.remove('active');
+    }
+  });
+
+  var urlPhone = phone ? encodeURIComponent(phone) : 'none';
+  var chatWrap = document.getElementById('chatWrap');
+  if (chatWrap) {
+    chatWrap.style.opacity = '0.5';
+  }
+
+  fetch('/inbox/chat/' + urlPhone)
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      if (chatWrap) {
+        chatWrap.innerHTML = html;
+        chatWrap.style.opacity = '1';
+        
+        var dataEl = document.getElementById('chatPaneData');
+        if (dataEl) {
+          ACTIVE_PHONE = dataEl.getAttribute('data-active-phone') || '';
+          lastMsgId = parseInt(dataEl.getAttribute('data-last-chat-id') || '0', 10);
+        }
+        
+        var newUrl = ACTIVE_PHONE ? '/inbox?phone=' + encodeURIComponent(ACTIVE_PHONE) : '/inbox';
+        history.pushState(null, '', newUrl);
+
+        var wrapWrap = document.querySelector('.inbox-wrap');
+        if (wrapWrap) {
+          if (ACTIVE_PHONE) {
+            wrapWrap.classList.add('has-active');
+          } else {
+            wrapWrap.classList.remove('has-active');
+          }
+        }
+        
+        if (ACTIVE_PHONE) {
+          scrollBottom();
+          checkWindow();
+          
+          clearTimeout(pollTimer);
+          pollTimer = setTimeout(pollOnce, 1500);
+        } else {
+          clearTimeout(pollTimer);
+        }
+      }
+    })
+    .catch(function(e) {
+      if (chatWrap) chatWrap.style.opacity = '1';
+      console.error('Failed to load chat: ', e);
+    });
+}
+
+// Handle browser Back/Forward buttons dynamically
+window.addEventListener('popstate', function() {
+  var urlParams = new URLSearchParams(window.location.search);
+  var phone = urlParams.get('phone') || '';
+  selectConversation(phone);
+});
+
+// Intercept conversation list item clicks and back button clicks
+document.addEventListener('click', function(e) {
+  var delBtn = e.target.closest('.conv-del');
+  if (delBtn) return;
+  
+  var link = e.target.closest('a');
+  if (link) {
+    var href = link.getAttribute('href') || '';
+    
+    // Check if it matches /inbox?phone=... or the template url_for
+    var matchInboxQuery = href.includes('/inbox?phone=') || href.includes('inbox?phone=');
+    if (matchInboxQuery) {
+      e.preventDefault();
+      var parts = href.split('phone=');
+      var phone = parts[1] ? decodeURIComponent(parts[1]) : '';
+      selectConversation(phone);
+      return;
+    }
+    
+    // Check if it is the back link to empty inbox
+    if (href === '/inbox' || href.endsWith('/inbox')) {
+      e.preventDefault();
+      selectConversation('');
+      return;
+    }
+  }
+});
 
 /* ── Scroll to bottom ── */
 function scrollBottom() {
@@ -346,11 +374,11 @@ function appendBubble(m) {
   var time = m.timestamp ? m.timestamp.substr(11, 5) : '';
   var statusIcon = '';
   if (m.direction === 'out') {
-    statusIcon = m.status === 'read'      ? ' ✓✓'
-              : m.status === 'delivered' ? ' ✓✓'
-              : m.status === 'sent'      ? ' ✓'
-              : m.status === 'failed'    ? ' ✗'
-              :                            ' ⏳';
+    statusIcon = m.status === 'read'      ? ' <span style="color:#34b7f1;font-weight:bold;">✓✓</span>'
+              : m.status === 'delivered' ? ' <span style="color:#94a3b8;">✓✓</span>'
+              : m.status === 'sent'      ? ' <span style="color:#94a3b8;">✓</span>'
+              : m.status === 'failed'    ? ' <span style="color:#dc2626;font-weight:bold;">✗</span>'
+              :                            ' <span style="color:#94a3b8;">⏳</span>';
   }
   var body;
   if (m.media_path) {
@@ -400,42 +428,55 @@ function pollMessages() {
     .catch(function(){});
 }
 
+// Adaptive polling: fast when activity, slow when idle, paused when tab hidden.
+// Saves ~70% of inbox poll traffic on busy days.
+var POLL_FAST = 1500;     // active conversation, recent activity (1.5s)
+var POLL_SLOW = 5000;     // no new messages for a while (5s)
+var IDLE_AFTER = 30000;   // 30s without a new message → slow down
+var lastActivity = Date.now();
+
+function currentInterval() {
+  if (document.hidden) return null;                    // pause entirely
+  return (Date.now() - lastActivity < IDLE_AFTER) ? POLL_FAST : POLL_SLOW;
+}
+
+function pollOnce() {
+  clearTimeout(pollTimer);
+  if (!document.hidden && ACTIVE_PHONE) {
+    var prev = lastMsgId;
+    pollMessages();
+    // pollMessages updates lastMsgId via appendBubble; bump activity if it grew
+    if (lastMsgId > prev) lastActivity = Date.now();
+  }
+  var nxt = currentInterval();
+  pollTimer = setTimeout(pollOnce, nxt || POLL_SLOW);
+}
+
 if (ACTIVE_PHONE) {
   checkWindow();
-  // Adaptive polling: fast when activity, slow when idle, paused when tab hidden.
-  // Saves ~70% of inbox poll traffic on busy days.
-  var POLL_FAST = 1500;     // active conversation, recent activity (1.5s)
-  var POLL_SLOW = 5000;     // no new messages for a while (5s)
-  var IDLE_AFTER = 30000;   // 30s without a new message → slow down
-  var lastActivity = Date.now();
-  function currentInterval() {
-    if (document.hidden) return null;                    // pause entirely
-    return (Date.now() - lastActivity < IDLE_AFTER) ? POLL_FAST : POLL_SLOW;
-  }
-  function pollOnce() {
-    clearTimeout(pollTimer);
-    if (!document.hidden) {
-      var prev = lastMsgId;
-      pollMessages();
-      // pollMessages updates lastMsgId via appendBubble; bump activity if it grew
-      if (lastMsgId > prev) lastActivity = Date.now();
-    }
-    var nxt = currentInterval();
-    pollTimer = setTimeout(pollOnce, nxt || POLL_SLOW);
-  }
   pollTimer = setTimeout(pollOnce, POLL_FAST);
-  // Resume fast polling immediately when user comes back to the tab
-  document.addEventListener('visibilitychange', function() {
-    if (!document.hidden) {
-      clearTimeout(pollTimer);
-      lastActivity = Date.now();
-      pollOnce();
-    }
-  });
-  // Any click / typing inside the chat is "activity"
-  document.getElementById('chatMessages')?.addEventListener('click',   function(){ lastActivity = Date.now(); });
-  document.getElementById('msgInput')?.addEventListener('input',       function(){ lastActivity = Date.now(); });
 }
+
+// Resume fast polling immediately when user comes back to the tab
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden) {
+    clearTimeout(pollTimer);
+    lastActivity = Date.now();
+    pollOnce();
+  }
+});
+
+// Any click / typing inside the active chat is "activity"
+document.addEventListener('click', function(e) {
+  if (e.target.closest('#chatMessages') || e.target.closest('#msgInput')) {
+    lastActivity = Date.now();
+  }
+});
+document.addEventListener('input', function(e) {
+  if (e.target.closest('#msgInput')) {
+    lastActivity = Date.now();
+  }
+});
 
 /* ── Send message ── */
 function sendMessage() {
@@ -526,16 +567,42 @@ function cleanPhone(raw) {
 }
 
 /* ── Filter conversations + offer to start a chat with an arbitrary number ── */
+var CURRENT_FILTER = 'all';
+
+function setInboxFilter(filter) {
+  CURRENT_FILTER = filter;
+  
+  // Update button active classes
+  document.getElementById('filterBtnAll')?.classList.toggle('active', filter === 'all');
+  document.getElementById('filterBtnOpen')?.classList.toggle('active', filter === 'open');
+  document.getElementById('filterBtnUnread')?.classList.toggle('active', filter === 'unread');
+  
+  // Re-run conversation filtering based on current search input
+  var q = document.getElementById('convSearch')?.value || '';
+  filterConvs(q);
+}
+
+/* ── Filter conversations + offer to start a chat with an arbitrary number ── */
 function filterConvs(q) {
   var ql = q.toLowerCase();
-  var anyVisible = false;
   document.querySelectorAll('.conv-item').forEach(function(el) {
     var name  = el.dataset.name  || '';
     var phone = el.dataset.phone || '';
-    var match = !ql || name.includes(ql) || phone.includes(ql);
-    el.style.display = match ? '' : 'none';
-    if (match) anyVisible = true;
+    
+    // Check search query match
+    var searchMatch = !ql || name.includes(ql) || phone.includes(ql);
+    
+    // Check tab filter match
+    var filterMatch = true;
+    if (CURRENT_FILTER === 'open') {
+      filterMatch = el.getAttribute('data-window-open') === '1';
+    } else if (CURRENT_FILTER === 'unread') {
+      filterMatch = el.getAttribute('data-unread') === '1';
+    }
+    
+    el.style.display = (searchMatch && filterMatch) ? '' : 'none';
   });
+  
   // If the search looks like a phone number, show an "Open chat" suggestion
   var suggest = document.getElementById('phoneSuggest');
   var cleaned = cleanPhone(q);

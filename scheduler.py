@@ -121,6 +121,7 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
             log_message(
                 batch_id, p["phone"], p.get("name"), p.get("route"),
                 p.get("platform"), template_name, "sent", wa_msg_id=result,
+                params=params
             )
             upsert_customer(p["phone"], p.get("name"),
                             p.get("route"), p.get("platform"))
@@ -130,6 +131,7 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
             log_message(
                 batch_id, p["phone"], p.get("name"), p.get("route"),
                 p.get("platform"), template_name, "failed", error=result,
+                params=params
             )
             update_batch_counts(batch_id, failed=1)
             RUNNING_BATCHES[batch_id]["failed"] += 1
