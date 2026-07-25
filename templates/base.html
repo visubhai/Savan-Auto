@@ -167,6 +167,36 @@
     /* Divider */
     .divider { height: 1px; background: var(--border); margin: 20px 0; }
 
+    /* Global YouTube-style top loader bar */
+    .global-loader {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      z-index: 99999;
+      background: transparent;
+      overflow: hidden;
+      pointer-events: none;
+      display: none;
+    }
+    .global-loader-bar {
+      height: 100%;
+      background: var(--amber);
+      width: 0%;
+      position: absolute;
+      left: 0;
+      transition: width 0.2s ease-out;
+    }
+    .global-loader.animating .global-loader-bar {
+      animation: globalLoaderAnim 1.6s infinite ease-in-out;
+    }
+    @keyframes globalLoaderAnim {
+      0% { width: 0%; left: 0%; }
+      50% { width: 35%; left: 30%; }
+      100% { width: 0%; left: 100%; }
+    }
+
     /* Mobile bottom navigation and PWA adjustments */
     .mobile-bottom-nav { display: none; }
     .bottom-sheet { display: none; }
@@ -424,6 +454,11 @@
 </head>
 <body>
 
+<!-- Global Progress Loader Bar -->
+<div id="globalLoader" class="global-loader">
+  <div class="global-loader-bar"></div>
+</div>
+
 <!-- Mobile sidebar backdrop -->
 <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
@@ -668,6 +703,65 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
 {% block scripts %}{% endblock %}
 
 <script>
+// Global loading progress bar controller (YouTube-style top bar)
+(function() {
+  var loader = document.getElementById('globalLoader');
+  var activeRequests = 0;
+  var loaderTimeout = null;
+
+  window.showGlobalLoader = function() {
+    clearTimeout(loaderTimeout);
+    if (loader) {
+      loader.style.display = 'block';
+      loader.classList.add('animating');
+    }
+  };
+
+  window.hideGlobalLoader = function() {
+    loaderTimeout = setTimeout(function() {
+      if (activeRequests <= 0 && loader) {
+        loader.classList.remove('animating');
+        loader.style.display = 'none';
+      }
+    }, 250); // 250ms minimum visual display duration
+  };
+
+  // Intercept native fetch API calls
+  var originalFetch = window.fetch;
+  window.fetch = function() {
+    activeRequests++;
+    showGlobalLoader();
+    return originalFetch.apply(this, arguments)
+      .then(function(response) {
+        activeRequests--;
+        hideGlobalLoader();
+        return response;
+      })
+      .catch(function(error) {
+        activeRequests--;
+        hideGlobalLoader();
+        throw error;
+      });
+  };
+
+  // Intercept normal anchor tag link transitions
+  document.addEventListener('click', function(e) {
+    var link = e.target.closest('a');
+    if (link) {
+      var href = link.getAttribute('href') || '';
+      var target = link.getAttribute('target') || '';
+      if (href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.startsWith('tel:') && !href.startsWith('mailto:') && target !== '_blank') {
+        showGlobalLoader();
+      }
+    }
+  });
+
+  // Intercept standard form submissions
+  document.addEventListener('submit', function() {
+    showGlobalLoader();
+  });
+})();
+
 // Poll for unread inbox messages every 3 seconds (updates both desktop and mobile tab bar badges)
 (function() {
   function pollUnread() {
