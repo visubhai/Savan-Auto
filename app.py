@@ -365,6 +365,16 @@ def index():
     return redirect(url_for("login"))
 
 
+@app.route("/manifest.json")
+def serve_manifest():
+    return send_file("static/manifest.json", mimetype="application/json")
+
+
+@app.route("/sw.js")
+def serve_sw():
+    return send_file("static/sw.js", mimetype="application/javascript")
+
+
 # ---------------- Dashboard ----------------
 @app.route("/dashboard")
 @login_required

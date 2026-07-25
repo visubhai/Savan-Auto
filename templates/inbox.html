@@ -114,9 +114,9 @@
   /* Mobile: show EITHER the list OR the open chat (WhatsApp pattern). */
   .inbox-back { display:none; }
   @media (max-width: 820px) {
-    .inbox-wrap { flex-direction:column; height:auto; min-height:0; gap:0; }
-    .conv-list { width:100%; max-height:none; height:calc(100vh - 130px); border-radius:12px; border-right:1px solid var(--border); }
-    .chat-wrap { border-left:1px solid var(--border); border-radius:12px; min-height:calc(100vh - 130px); }
+    .inbox-wrap { flex-direction:column; height:calc(100vh - 56px - 56px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); min-height:0; gap:0; }
+    .conv-list { width:100%; max-height:none; height:100%; border-radius:0; border-right:none; }
+    .chat-wrap { border-left:none; border-radius:0; height:100%; min-height:0; }
     .bubble { max-width:88%; font-size:14.5px; }
 
     /* When a chat is open on mobile, hide the conversation list */
@@ -512,6 +512,7 @@ function sendMessage() {
   .then(function(r){ return r.json(); })
   .then(function(data) {
     if (data.ok) {
+      if (navigator.vibrate) navigator.vibrate([15]);
       // Find the temporary bubble and update it with the actual message ID and sent status
       var row = document.querySelector('[data-id="' + tempId + '"]');
       if (row) {
@@ -656,6 +657,7 @@ function sendTemplateFromInbox() {
   .then(function(r){ return r.json(); })
   .then(function(data) {
     if (data.ok) {
+      if (navigator.vibrate) navigator.vibrate([15]);
       appendBubble({
         id: data.id, direction: 'out',
         content: data.content || ('📋 Sent template: ' + tpl),
