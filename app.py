@@ -12,7 +12,7 @@ from datetime import datetime
 from functools import wraps
 from flask import (
     Flask, render_template, request, redirect, url_for, session,
-    jsonify, flash, send_file, abort,
+    jsonify, flash, send_file, abort, Response,
 )
 # `redirect` is already imported above — used by serve_media for R2.
 
@@ -22,6 +22,57 @@ from meta_api import WhatsAppAPI
 import scheduler
 import storage
 import gmail_fetch
+import queue
+
+sse_clients = []
+
+def notify_sse_clients(event_type, data):
+    payload = json.dumps({"event": event_type, "data": data})
+    for q in list(sse_clients):
+        try:
+            q.put_nowait(payload)
+        except queue.Full:
+            try:
+                sse_clients.remove(q)
+            except ValueError:
+                pass
+
+original_save_chat_message = db.save_chat_message
+
+def wrapped_save_chat_message(*args, **kwargs):
+    msg_id = original_save_chat_message(*args, **kwargs)
+    try:
+        phone = args[0] if len(args) > 0 else kwargs.get("phone")
+        direction = args[2] if len(args) > 2 else kwargs.get("direction")
+        content = args[3] if len(args) > 3 else kwargs.get("content")
+        notify_sse_clients("message", {
+            "id": msg_id,
+            "phone": phone,
+            "direction": direction,
+            "content": content,
+        })
+    except Exception as e:
+        pass
+    return msg_id
+
+db.save_chat_message = wrapped_save_chat_message
+
+original_update_chat_status = db.update_chat_status
+
+def wrapped_update_chat_status(*args, **kwargs):
+    res = original_update_chat_status(*args, **kwargs)
+    try:
+        wa_message_id = args[0] if len(args) > 0 else kwargs.get("wa_message_id")
+        status = args[1] if len(args) > 1 else kwargs.get("status")
+        notify_sse_clients("status", {
+            "wa_message_id": wa_message_id,
+            "status": status,
+        })
+    except Exception as e:
+        pass
+    return res
+
+db.update_chat_status = wrapped_update_chat_status
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "savan-travels-localhost-secret-2024")
@@ -703,11 +754,28 @@ def send_retry(batch_id):
         "name": m["customer_name"] or "Customer",
         "route": m["route"] or "",
         "platform": m["platform"] or "",
+        "params": m.get("params"),
     } for m in failed]
+
+    batch = db.get_batch(batch_id)
+    campaign_id = None
+    header_media_id_override = None
+    if batch and batch.get("name", "").startswith("[Campaign] "):
+        camp_name = batch["name"].replace("[Campaign] ", "").strip()
+        try:
+            # Look up campaign by name to retrieve its details
+            camp = db._db().campaigns.find_one({"name": camp_name})
+            if camp:
+                campaign_id = camp.get("id")
+                header_media_id_override = camp.get("header_media_id")
+        except Exception:
+            pass
 
     template_name = failed[0]["template_name"] or db.get_setting("default_template", "journey_reminder")
     new_batch_id = scheduler.start_send_thread(
         passengers, template_name, f"Retry of #{batch_id}", session["user_id"],
+        header_media_id_override=header_media_id_override,
+        campaign_id=campaign_id,
     )
     return redirect(url_for("send_progress", batch_id=new_batch_id))
 
@@ -866,6 +934,12 @@ def templates_upload_image(name):
     media_id = api.upload_media(content, mime, filename=name)
     if not media_id:
         return jsonify({"ok": False, "error": "Meta refused the upload (check size/format)"}), 502
+
+    # Save file locally to allow automatic re-upload when Meta's 30-day limit expires
+    media_dir = os.path.join("uploads", "media")
+    os.makedirs(media_dir, exist_ok=True)
+    with open(os.path.join(media_dir, f"template_{name}"), "wb") as f_out:
+        f_out.write(content)
 
     # Persist new media_id + mark as custom
     db.upsert_template(
@@ -1407,6 +1481,7 @@ def campaigns_send(campaign_id):
             passengers, camp["template_name"], batch_name,
             session["user_id"], fixed_params=camp["variables"],
             header_media_id_override=camp.get("header_media_id"),
+            campaign_id=campaign_id,
         )
         db.update_campaign_last_used(campaign_id)
         return redirect(url_for("send_progress", batch_id=batch_id))
@@ -1453,6 +1528,12 @@ def campaigns_upload_image(campaign_id):
     if not media_id:
         return jsonify({"ok": False, "error": "Meta refused the upload (check size/format)"}), 502
 
+    # Save file locally to allow automatic re-upload when Meta's 30-day limit expires
+    media_dir = os.path.join("uploads", "media")
+    os.makedirs(media_dir, exist_ok=True)
+    with open(os.path.join(media_dir, f"campaign_{campaign_id}"), "wb") as f_out:
+        f_out.write(content)
+
     db.update_campaign_image(campaign_id, media_id, mime, len(content))
     return jsonify({"ok": True, "media_id": media_id, "size": len(content)})
 
@@ -1465,6 +1546,13 @@ def campaigns_clear_image(campaign_id):
     if not camp:
         return jsonify({"ok": False, "error": "campaign not found"}), 404
     db.clear_campaign_image(campaign_id)
+    # Remove local file if it exists
+    local_path = os.path.join("uploads", "media", f"campaign_{campaign_id}")
+    if os.path.exists(local_path):
+        try:
+            os.remove(local_path)
+        except Exception:
+            pass
     return jsonify({"ok": True})
 
 
@@ -2336,6 +2424,29 @@ def inbox_poll():
         return jsonify([])
     msgs = [dict(m) for m in db.get_new_messages(phone, after_id)]
     return jsonify(msgs)
+
+
+@app.route("/api/inbox/stream")
+@login_required
+def inbox_stream():
+    def event_stream():
+        q = queue.Queue(maxsize=100)
+        sse_clients.append(q)
+        try:
+            yield "data: {\"event\": \"connected\"}\n\n"
+            while True:
+                try:
+                    payload = q.get(timeout=20)
+                    yield f"data: {payload}\n\n"
+                except queue.Empty:
+                    yield "data: {\"event\": \"ping\"}\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            if q in sse_clients:
+                sse_clients.remove(q)
+
+    return Response(event_stream(), mimetype="text/event-stream")
 
 
 @app.route("/api/inbox/unread")

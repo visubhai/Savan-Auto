@@ -9,8 +9,142 @@ from database import (
     get_due_jobs, update_scheduled_job, create_batch,
     log_message, update_batch_counts, complete_batch,
     upsert_customer, get_template_by_name, get_setting,
+    get_campaign, update_campaign_image, clear_campaign_image,
+    update_template_meta, _now,
 )
 from meta_api import WhatsAppAPI
+import os
+import requests
+from datetime import datetime, timedelta, timezone
+
+def now_ist():
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).replace(tzinfo=None)
+
+def refresh_template_media(template_name):
+    """Ensure the template's header_media_id is valid (not expired).
+    Returns the valid media_id, or None if not applicable/failed.
+    """
+    template = get_template_by_name(template_name)
+    if not template:
+        return None
+    
+    header_type = (template.get("header_type") or "").upper()
+    if header_type not in ("IMAGE", "VIDEO", "DOCUMENT"):
+        return None
+        
+    media_id = template.get("header_media_id")
+    uploaded_at = template.get("header_image_uploaded_at")
+    
+    # Check if media_id is expired (older than 25 days) or missing
+    need_refresh = False
+    if not media_id:
+        need_refresh = True
+    elif uploaded_at:
+        try:
+            dt = datetime.strptime(uploaded_at, "%Y-%m-%d %H:%M:%S")
+            if (now_ist() - dt).days >= 25:
+                need_refresh = True
+        except Exception:
+            need_refresh = True
+    else:
+        need_refresh = True
+        
+    if not need_refresh:
+        return media_id
+
+    # Try to re-upload
+    local_path = os.path.join("uploads", "media", f"template_{template_name}")
+    content = None
+    mime = template.get("header_image_mime") or "image/jpeg"
+    if os.path.exists(local_path):
+        try:
+            with open(local_path, "rb") as f:
+                content = f.read()
+        except Exception as e:
+            print(f"[refresh_template_media] Failed to read local template file: {e}")
+
+    if not content and template.get("header_example"):
+        try:
+            r = requests.get(template["header_example"], timeout=30)
+            if r.status_code == 200 and r.content:
+                content = r.content
+                mime = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                os.makedirs(os.path.join("uploads", "media"), exist_ok=True)
+                with open(local_path, "wb") as f:
+                    f.write(content)
+        except Exception as e:
+            print(f"[refresh_template_media] Failed to fetch template header example: {e}")
+
+    if content:
+        try:
+            api = WhatsAppAPI()
+            new_media_id = api.upload_media(content, mime, filename=template_name)
+            if new_media_id:
+                update_template_meta(
+                    template_name,
+                    header_media_id=new_media_id,
+                    header_image_uploaded_at=_now(),
+                    header_image_mime=mime,
+                    header_image_size=len(content)
+                )
+                print(f"[refresh_template_media] Refreshed template {template_name} media_id to {new_media_id}")
+                return new_media_id
+        except Exception as e:
+            print(f"[refresh_template_media] Failed to upload template media: {e}")
+
+    return media_id
+
+
+def refresh_campaign_media(campaign_id):
+    """Ensure the campaign's custom header_media_id is valid.
+    Returns the valid media_id, or None if not applicable/failed.
+    """
+    try:
+        camp = get_campaign(int(campaign_id))
+    except Exception:
+        return None
+    if not camp:
+        return None
+
+    media_id = camp.get("header_media_id")
+    if not media_id:
+        return None
+
+    uploaded_at = camp.get("header_image_uploaded_at")
+    need_refresh = False
+    if uploaded_at:
+        try:
+            dt = datetime.strptime(uploaded_at, "%Y-%m-%d %H:%M:%S")
+            if (now_ist() - dt).days >= 25:
+                need_refresh = True
+        except Exception:
+            need_refresh = True
+    else:
+        need_refresh = True
+
+    if not need_refresh:
+        return media_id
+
+    local_path = os.path.join("uploads", "media", f"campaign_{campaign_id}")
+    if os.path.exists(local_path):
+        try:
+            with open(local_path, "rb") as f:
+                content = f.read()
+            mime = camp.get("header_image_mime") or "image/jpeg"
+            api = WhatsAppAPI()
+            new_media_id = api.upload_media(content, mime, filename=f"camp_{campaign_id}")
+            if new_media_id:
+                update_campaign_image(campaign_id, new_media_id, mime, len(content))
+                print(f"[refresh_campaign_media] Refreshed campaign {campaign_id} media_id to {new_media_id}")
+                return new_media_id
+        except Exception as e:
+            print(f"[refresh_campaign_media] Failed to refresh campaign media: {e}")
+    else:
+        clear_campaign_image(campaign_id)
+        print(f"[refresh_campaign_media] Local file for expired campaign {campaign_id} custom image is missing. Cleared override.")
+        return None
+
+    return media_id
 
 
 # Track running batches: {batch_id: {'total', 'sent', 'failed', 'current_name', 'status'}}
@@ -18,7 +152,7 @@ RUNNING_BATCHES = {}
 
 
 def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=None,
-               var_overrides=None, header_media_id_override=None):
+               var_overrides=None, header_media_id_override=None, campaign_id=None):
     """Send a batch of messages. Runs in a background thread.
 
     var_overrides: optional dict {var_index(str/int): fixed_value}. When a value
@@ -61,6 +195,13 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
     language = template["language"]
     var_count = template["variable_count"]
 
+    # Refresh template and campaign media IDs if needed to prevent 30-day expiration issues
+    if campaign_id:
+        header_media_id_override = refresh_campaign_media(campaign_id)
+    
+    template_media_id = refresh_template_media(template_name)
+    final_header_media_id = header_media_id_override or template_media_id
+
     api = WhatsAppAPI()
     delay = float(get_setting("delay_between_messages", "1.5"))
 
@@ -70,8 +211,13 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
     }
 
     for idx, p in enumerate(passengers):
-        # Build parameters — use fixed_params for bulk campaigns, else per-passenger data
-        if fixed_params is not None:
+        # Build parameters — use passenger params if available, else fixed_params, else per-passenger data
+        if p.get("params") is not None:
+            params = list(p["params"][:var_count])
+            # Pad if not enough values provided
+            while len(params) < var_count:
+                params.append("—")
+        elif fixed_params is not None:
             params = list(fixed_params[:var_count])
             # Pad if not enough values provided
             while len(params) < var_count:
@@ -114,7 +260,7 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
             p["phone"], template_name, language, params,
             header_type=template.get("header_type"),
             header_example=template.get("header_example"),
-            header_media_id=(header_media_id_override or template.get("header_media_id")),
+            header_media_id=final_header_media_id,
         )
 
         if success:
@@ -145,13 +291,13 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
 
 
 def start_send_thread(passengers, template_name, batch_name, user_id, fixed_params=None,
-                      var_overrides=None, header_media_id_override=None):
+                      var_overrides=None, header_media_id_override=None, campaign_id=None):
     """Create a batch and start a sending thread. Returns batch_id."""
     batch_id = create_batch(batch_name, template_name, len(passengers), user_id)
     thread = threading.Thread(
         target=send_batch,
         args=(batch_id, passengers, template_name, user_id, fixed_params,
-              var_overrides, header_media_id_override),
+              var_overrides, header_media_id_override, campaign_id),
         daemon=True,
     )
     thread.start()

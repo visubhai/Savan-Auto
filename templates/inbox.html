@@ -216,9 +216,9 @@
 
 {% block scripts %}
 <script>
-var ACTIVE_PHONE = {{ (active_phone or '')|tojson }};
+var ACTIVE_PHONE = "{{ active_phone or '' }}";
 // last_chat_id is the max integer id of real chat messages (bulk-only history → 0)
-var lastMsgId    = {{ last_chat_id|default(0) }};
+var lastMsgId    = Number("{{ last_chat_id|default(0) }}");
 var pollTimer    = null;
 
 /* ── Dynamic Conversation Switching without page reload ── */
@@ -431,11 +431,10 @@ function pollMessages() {
     .catch(function(){});
 }
 
-// Adaptive polling: fast when activity, slow when idle, paused when tab hidden.
-// Saves ~70% of inbox poll traffic on busy days.
-var POLL_FAST = 1500;     // active conversation, recent activity (1.5s)
-var POLL_SLOW = 5000;     // no new messages for a while (5s)
-var IDLE_AFTER = 30000;   // 30s without a new message → slow down
+// Fallback polling (adaptive, very slow since we have SSE for instant updates)
+var POLL_FAST = 30000;    // 30 seconds fallback
+var POLL_SLOW = 60000;    // 60 seconds fallback
+var IDLE_AFTER = 60000;   // 60s
 var lastActivity = Date.now();
 
 function currentInterval() {
@@ -448,7 +447,6 @@ function pollOnce() {
   if (!document.hidden && ACTIVE_PHONE) {
     var prev = lastMsgId;
     pollMessages();
-    // pollMessages updates lastMsgId via appendBubble; bump activity if it grew
     if (lastMsgId > prev) lastActivity = Date.now();
   }
   var nxt = currentInterval();
@@ -460,14 +458,58 @@ if (ACTIVE_PHONE) {
   pollTimer = setTimeout(pollOnce, POLL_FAST);
 }
 
-// Resume fast polling immediately when user comes back to the tab
+// Resume polling immediately when user comes back to the tab
 document.addEventListener('visibilitychange', function() {
   if (!document.hidden) {
     clearTimeout(pollTimer);
     lastActivity = Date.now();
     pollOnce();
+    pollConversationsList();
   }
 });
+
+// Server-Sent Events (SSE) for instant, live updates
+(function() {
+  function connectSSE() {
+    var source = new EventSource('/api/inbox/stream');
+
+    source.onmessage = function(e) {
+      try {
+        var msg = JSON.parse(e.data);
+        if (msg.event === 'connected') {
+          console.log('SSE connected');
+          return;
+        }
+        if (msg.event === 'ping') {
+          return;
+        }
+
+        // Trigger instant updates on message/status events
+        if (msg.event === 'message') {
+          pollConversationsList();
+          if (ACTIVE_PHONE && String(msg.data.phone).toLowerCase() === String(ACTIVE_PHONE).toLowerCase()) {
+            pollMessages();
+          }
+        } else if (msg.event === 'status') {
+          pollConversationsList();
+          if (ACTIVE_PHONE) {
+            pollMessages();
+          }
+        }
+      } catch (err) {
+        console.error('SSE parsing error:', err);
+      }
+    };
+
+    source.onerror = function() {
+      console.warn('SSE disconnected. Reconnecting in 3s...');
+      source.close();
+      setTimeout(connectSSE, 3000);
+    };
+  }
+
+  connectSSE();
+})();
 
 // Any click / typing inside the active chat is "activity"
 document.addEventListener('click', function(e) {
@@ -765,8 +807,8 @@ function pollConversationsList() {
     .catch(function() {});
 }
 
-// Poll conversation list updates every 3 seconds
-setInterval(pollConversationsList, 3000);
+// Poll conversation list updates every 60 seconds (relying primarily on SSE)
+setInterval(pollConversationsList, 60000);
 
 /* ── Delete-conversation handlers ─────────────────────────────────────
    Hard-deletes every message with one phone number. Used from two places:
@@ -786,7 +828,7 @@ function deleteConversation(phone, displayName, opts) {
       if (!d.ok) { alert('Delete failed: ' + (d.error || 'unknown')); return; }
       if (opts.wasActive) {
         // We were viewing the deleted chat — go back to the empty inbox
-        window.location.href = {{ url_for('inbox')|tojson }};
+        window.location.href = "{{ url_for('inbox') }}";
       } else {
         // Just remove the row from the list
         var row = document.querySelector('.conv-item[data-phone="' + phone.toLowerCase() + '"]');

@@ -519,15 +519,14 @@ else:
 
     def get_today_conversations():
         """Count of UNIQUE customer phones we successfully sent to today (IST).
-
-        This matches WhatsApp's "business-initiated conversations" metric
-        that counts against your messaging tier — one conversation per
+        Helps monitoring Meta's rolling 24-hour limit/tier. Note: starts from
+        midnight clock-time in India, which aligns with how Meta resets the
         24-hour window per customer.
         """
         today = _today()  # 'YYYY-MM-DD' in IST
         return len(_db().messages.distinct(
             "customer_phone",
-            {"status": "sent", "sent_at": {"$gte": today}},
+            {"status": {"$in": ["sent", "delivered", "read"]}, "sent_at": {"$gte": today}},
         ))
 
     def get_unique_conversations(days=7):
@@ -541,7 +540,7 @@ else:
         cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
         return len(_db().messages.distinct(
             "customer_phone",
-            {"status": "sent", "sent_at": {"$gte": cutoff}},
+            {"status": {"$in": ["sent", "delivered", "read"]}, "sent_at": {"$gte": cutoff}},
         ))
 
     def get_recent_recipients(days=30, template_name=None, status="sent"):
@@ -553,7 +552,10 @@ else:
         cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
         match = {"sent_at": {"$gte": cutoff}}
         if status:
-            match["status"] = status
+            if status == "sent":
+                match["status"] = {"$in": ["sent", "delivered", "read"]}
+            else:
+                match["status"] = status
         if template_name:
             match["template_name"] = template_name
         pipeline = [
@@ -579,14 +581,14 @@ else:
 
     def get_today_stats():
         today = _today()
-        sent   = _db().messages.count_documents({"status": "sent",   "sent_at": {"$gte": today}})
+        sent   = _db().messages.count_documents({"status": {"$in": ["sent", "delivered", "read"]},   "sent_at": {"$gte": today}})
         failed = _db().messages.count_documents({"status": "failed", "sent_at": {"$gte": today}})
         cost_per = float(get_setting("cost_per_message", "0.12"))
         return {"sent": sent, "failed": failed, "cost": round(sent * cost_per, 2)}
 
     def get_month_stats():
         month_start = now_ist().strftime("%Y-%m-01")
-        sent   = _db().messages.count_documents({"status": "sent",   "sent_at": {"$gte": month_start}})
+        sent   = _db().messages.count_documents({"status": {"$in": ["sent", "delivered", "read"]},   "sent_at": {"$gte": month_start}})
         failed = _db().messages.count_documents({"status": "failed", "sent_at": {"$gte": month_start}})
         cost_per = float(get_setting("cost_per_message", "0.12"))
         wap_cost = float(get_setting("wapsolution_monthly_cost", "2000"))
@@ -602,7 +604,7 @@ else:
             {"$match": {"sent_at": {"$gte": cutoff}}},
             {"$group": {
                 "_id": {"$substr": ["$sent_at", 0, 10]},
-                "sent":   {"$sum": {"$cond": [{"$eq": ["$status", "sent"]},   1, 0]}},
+                "sent":   {"$sum": {"$cond": [{"$in": ["$status", ["sent", "delivered", "read"]]},   1, 0]}},
                 "failed": {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
             }},
             {"$sort": {"_id": 1}},
@@ -617,7 +619,7 @@ else:
 
     def get_top_routes(limit=5):
         pipeline = [
-            {"$match": {"status": "sent", "route": {"$ne": None}}},
+            {"$match": {"status": {"$in": ["sent", "delivered", "read"]}, "route": {"$ne": None}}},
             {"$group": {"_id": "$route", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}},
             {"$limit": limit},

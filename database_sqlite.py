@@ -660,7 +660,7 @@ def get_today_conversations():
     with get_db() as db:
         row = db.execute(
             "SELECT COUNT(DISTINCT customer_phone) AS c FROM messages "
-            "WHERE status='sent' "
+            "WHERE status IN ('sent', 'delivered', 'read') "
             "AND date(sent_at)=date('now', '+330 minutes')"
         ).fetchone()
         return row["c"] if row else 0
@@ -675,7 +675,7 @@ def get_unique_conversations(days=7):
     with get_db() as db:
         row = db.execute(
             "SELECT COUNT(DISTINCT customer_phone) AS c FROM messages "
-            "WHERE status='sent' "
+            "WHERE status IN ('sent', 'delivered', 'read') "
             "AND sent_at >= datetime('now', '+330 minutes', ?)",
             (f"-{int(days)} days",),
         ).fetchone()
@@ -696,8 +696,11 @@ def get_recent_recipients(days=30, template_name=None, status="sent"):
     )
     params = [f"-{int(days)} days"]
     if status:
-        sql += " AND status = ?"
-        params.append(status)
+        if status == "sent":
+            sql += " AND status IN ('sent', 'delivered', 'read')"
+        else:
+            sql += " AND status = ?"
+            params.append(status)
     if template_name:
         sql += " AND template_name = ?"
         params.append(template_name)
@@ -710,7 +713,7 @@ def get_recent_recipients(days=30, template_name=None, status="sent"):
 def get_today_stats():
     with get_db() as db:
         sent = db.execute(
-            "SELECT COUNT(*) as c FROM messages WHERE status='sent' AND date(sent_at)=date('now', '+330 minutes')"
+            "SELECT COUNT(*) as c FROM messages WHERE status IN ('sent', 'delivered', 'read') AND date(sent_at)=date('now', '+330 minutes')"
         ).fetchone()["c"]
         failed = db.execute(
             "SELECT COUNT(*) as c FROM messages WHERE status='failed' AND date(sent_at)=date('now', '+330 minutes')"
@@ -722,7 +725,7 @@ def get_today_stats():
 def get_month_stats():
     with get_db() as db:
         sent = db.execute(
-            "SELECT COUNT(*) as c FROM messages WHERE status='sent' "
+            "SELECT COUNT(*) as c FROM messages WHERE status IN ('sent', 'delivered', 'read') "
             "AND strftime('%Y-%m', sent_at) = strftime('%Y-%m', 'now', '+330 minutes')"
         ).fetchone()["c"]
         failed = db.execute(
@@ -746,7 +749,7 @@ def get_chart_data(days=7):
     with get_db() as db:
         rows = db.execute(
             f"""SELECT date(sent_at) as day,
-                       SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) as sent,
+                       SUM(CASE WHEN status IN ('sent', 'delivered', 'read') THEN 1 ELSE 0 END) as sent,
                        SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
                 FROM messages
                 WHERE sent_at >= date('now', '+330 minutes', '-{int(days)} days')
@@ -767,7 +770,7 @@ def get_top_routes(limit=5):
     with get_db() as db:
         return db.execute(
             """SELECT route, COUNT(*) as count FROM messages
-               WHERE status='sent' AND route IS NOT NULL
+               WHERE status IN ('sent', 'delivered', 'read') AND route IS NOT NULL
                GROUP BY route ORDER BY count DESC LIMIT ?""",
             (limit,),
         ).fetchall()
