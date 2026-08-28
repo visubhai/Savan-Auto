@@ -102,11 +102,12 @@
 
   <!-- ───── Right: stats + table ───── -->
   <div>
-    <div class="stats-row">
-      <div class="stat-pill"><div class="v" id="totalC">{{ passengers|length }}</div><div class="l">Total candidates</div></div>
+    <div class="stats-row" style="grid-template-columns:repeat(5,1fr);">
+      <div class="stat-pill"><div class="v">{{ pending.stats.total_rows or passengers|length }}</div><div class="l">Fetched from Gmail</div></div>
+      <div class="stat-pill ok"><div class="v" id="totalC">{{ passengers|length }}</div><div class="l">Effective Targets (≤{{ pending.stats.lookback_days or 2 }}d)</div></div>
       <div class="stat-pill"><div class="v" id="visibleC">{{ passengers|length }}</div><div class="l">Match filters</div></div>
       <div class="stat-pill ok"><div class="v" id="selectedC">{{ passengers|length }}</div><div class="l">Selected to send</div></div>
-      <div class="stat-pill"><div class="v">{{ pending.stats.reviewers or 0 }}</div><div class="l">Already reviewed</div></div>
+      <div class="stat-pill"><div class="v" style="color:#64748b;">{{ pending.stats.no_recent_msg or 0 }}</div><div class="l">Filtered (>{{ pending.stats.lookback_days or 2 }}d or No Msg)</div></div>
     </div>
 
     <div style="display:flex;gap:6px;margin-bottom:10px;">

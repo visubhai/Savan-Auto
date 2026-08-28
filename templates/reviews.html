@@ -87,10 +87,17 @@
 
     <!-- Lookback selector -->
     <form method="POST" action="{{ url_for('reviews_fetch') }}" style="margin:0;">
-      <div class="rv-lookback">
-        <span>Look back over the last</span>
-        <input type="number" name="lookback_days" min="1" max="365" value="{{ default_lookback }}" class="input">
-        <span>days of unread emails</span>
+      <div class="rv-lookback" style="flex-wrap:wrap;gap:12px;">
+        <div>
+          <span>Gmail: look back</span>
+          <input type="number" name="lookback_days" min="1" max="365" value="{{ default_lookback }}" class="input" style="width:70px;">
+          <span>days of unread emails</span>
+        </div>
+        <div style="color:var(--amber);font-weight:600;">
+          <span>• Effective Follow-up Check: sent a message within the last</span>
+          <input type="number" name="recent_msg_days" min="1" max="30" value="2" class="input" style="width:60px;font-weight:700;">
+          <span>days</span>
+        </div>
       </div>
 
       <!-- BIG primary action -->
@@ -109,6 +116,7 @@
     <!-- Manual upload (hidden by default) -->
     <div class="rv-manual" id="rvManual">
       <form method="POST" action="{{ url_for('reviews_upload') }}" enctype="multipart/form-data" id="reviewUploadForm">
+        <input type="hidden" name="recent_msg_days" value="2">
         <label for="reviewFile" class="rv-drop" id="reviewDrop">
           <div style="font-size:24px;margin-bottom:6px;">⬆</div>
           <div style="font-size:13px;color:var(--text);font-weight:600;">Click to choose file or drag &amp; drop</div>
@@ -123,12 +131,12 @@
 
   <!-- How it works -->
   <div class="card rv-steps">
-    <h3>How auto-fetch works</h3>
+    <h3>How effective follow-up auto-fetch works</h3>
     <div class="rv-step"><div class="num">1</div><div>Your operator portal emails the pending-review Excel to <strong>{{ gmail_address or 'your configured Gmail' }}</strong>.</div></div>
-    <div class="rv-step"><div class="num">2</div><div>You click <strong>Fetch latest review list from Gmail</strong>. We download the newest matching unread email's attachment automatically.</div></div>
-    <div class="rv-step"><div class="num">3</div><div>The app parses it, drops opted-out customers and duplicates, and lands on Send Preview with everyone loaded.</div></div>
-    <div class="rv-step"><div class="num">4</div><div>Your <code style="color:var(--amber);">review_followup</code> template is pre-selected. Hit Send (or Schedule).</div></div>
-    <div class="rv-step"><div class="num">5</div><div>Each email is marked as read and tracked by UID, so the next fetch only pulls newer ones — never the same file twice.</div></div>
+    <div class="rv-step"><div class="num">2</div><div>You click <strong>Fetch latest review list from Gmail</strong>. We download the newest matching email attachment.</div></div>
+    <div class="rv-step"><div class="num">3</div><div><strong>2-Day Message Check:</strong> The app checks your message logs to verify which customers were sent a message within the previous 2 days. Only customer who received an initial message are selected as <em>effective follow-up targets</em>.</div></div>
+    <div class="rv-step"><div class="num">4</div><div>Your <code style="color:var(--amber);">review_followup</code> template is pre-selected. Review the refined targets and hit Send (or Schedule).</div></div>
+    <div class="rv-step"><div class="num">5</div><div>Each email is marked as read and tracked by UID so the next fetch only pulls newer ones — never duplicate files.</div></div>
   </div>
 </div>
 

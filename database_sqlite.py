@@ -686,15 +686,19 @@ def get_recent_recipients(days=30, template_name=None, status="sent"):
     """One row per unique phone we've successfully sent to in the last
     `days` days, with the latest message's metadata.
     """
+    cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
     sql = (
         "SELECT customer_phone AS phone, "
-        "       MAX(sent_at)     AS sent_at, "
-        "       customer_name    AS name, "
+        "       sent_at, "
+        "       customer_name  AS name, "
         "       route, platform, template_name "
-        "FROM messages "
-        "WHERE sent_at >= datetime('now', '+330 minutes', ?) "
+        "FROM ("
+        "  SELECT customer_phone, sent_at, customer_name, route, platform, template_name, "
+        "         ROW_NUMBER() OVER (PARTITION BY customer_phone ORDER BY sent_at DESC) as rn "
+        "  FROM messages "
+        "  WHERE sent_at >= ? "
     )
-    params = [f"-{int(days)} days"]
+    params = [cutoff]
     if status:
         if status == "sent":
             sql += " AND status IN ('sent', 'delivered', 'read')"
@@ -704,9 +708,34 @@ def get_recent_recipients(days=30, template_name=None, status="sent"):
     if template_name:
         sql += " AND template_name = ?"
         params.append(template_name)
-    sql += " GROUP BY customer_phone ORDER BY sent_at DESC"
+    sql += ") WHERE rn = 1 ORDER BY sent_at DESC"
+
     with get_db() as db:
-        return [dict(r) for r in db.execute(sql, params).fetchall()]
+        rows = [dict(r) for r in db.execute(sql, params).fetchall()]
+
+    recent_map = {r["phone"]: r for r in rows if r.get("phone")}
+
+    chat_sql = "SELECT phone, MAX(timestamp) as sent_at, customer_name as name FROM chat_messages WHERE direction='out' AND timestamp >= ? GROUP BY phone"
+    try:
+        with get_db() as db:
+            chats = [dict(r) for r in db.execute(chat_sql, [cutoff]).fetchall()]
+            for c in chats:
+                p = c.get("phone")
+                ts = c.get("sent_at")
+                if p and ts:
+                    if p not in recent_map or (recent_map[p].get("sent_at") or "") < ts:
+                        recent_map[p] = {
+                            "phone": p,
+                            "name": c.get("name") or "Customer",
+                            "route": "",
+                            "platform": "",
+                            "template_name": "Outbound Chat",
+                            "sent_at": ts,
+                        }
+    except Exception:
+        pass
+
+    return list(recent_map.values())
 
 
 # ---------------- Dashboard stats ----------------

@@ -574,6 +574,24 @@ def send_preview():
         row = db.get_default_template()
         default_tpl = dict(row) if row else None
 
+    # Calculate route counts and sent history for filtering
+    from collections import Counter
+    routes_counter = Counter(p.get("route") or "Unspecified" for p in pending["passengers"])
+    route_counts = sorted(routes_counter.items(), key=lambda x: (-x[1], x[0]))
+
+    phones = [p["phone"] for p in pending["passengers"] if p.get("phone")]
+    sent_rows = list(db._db().messages.find(
+        {"customer_phone": {"$in": phones}, "status": {"$in": ["sent", "delivered", "read"]}},
+        {"customer_phone": 1, "sent_at": 1}
+    ))
+    sent_phones = {r["customer_phone"] for r in sent_rows}
+    already_sent_count = 0
+    for p in pending["passengers"]:
+        is_sent = p.get("phone") in sent_phones
+        p["already_sent"] = is_sent
+        if is_sent:
+            already_sent_count += 1
+
     cost_per = float(db.get_setting("cost_per_message", "0.12"))
     estimated_cost = round(len(pending["passengers"]) * cost_per, 2)
     delay = float(db.get_setting("delay_between_messages", "1.5"))
@@ -585,6 +603,8 @@ def send_preview():
     return render_template("send_preview.html",
                            pending=pending, templates=templates,
                            default_tpl=default_tpl,
+                           route_counts=route_counts,
+                           already_sent_count=already_sent_count,
                            estimated_cost=estimated_cost,
                            estimated_mins=estimated_mins,
                            needs_confirm=needs_confirm)
@@ -1595,8 +1615,10 @@ def _read_tabular_file(filename, content):
     return content
 
 
-def _start_followup_batch(parsed, source_label):
-    """Common: stash the parsed customers as pending → go to Send Preview."""
+def _start_followup_batch(parsed, source_label, lookback_days=2):
+    """Common: stash parsed customers as pending after filtering for effective follow-up targets
+    (customers to whom we sent a message within the previous lookback_days, default 2 days).
+    """
     passengers = parsed.get("passengers") or []
     total_rows = parsed.get("total_rows_seen", len(passengers))
 
@@ -1608,21 +1630,54 @@ def _start_followup_batch(parsed, source_label):
         )
         return redirect(url_for("reviews"))
 
-    # Respect opt-outs (same as the main Send flow)
+    # 1. Respect opt-outs (same as the main Send flow)
     opted_out_phones = {r["phone"] for r in db.search_customers(opted_out=True, limit=50000)}
     before = len(passengers)
     passengers = [p for p in passengers if p["phone"] not in opted_out_phones]
     opt_out_filtered = before - len(passengers)
 
+    # 2. Check sent message history within the previous `lookback_days` (default 2 days)
+    recent_recipients = db.get_recent_recipients(days=lookback_days)
+    recent_map = {r["phone"]: r for r in recent_recipients if r.get("phone")}
+
+    effective_passengers = []
+    no_recent_msg_count = 0
+
+    for p in passengers:
+        phone = p["phone"]
+        if phone in recent_map:
+            rec = recent_map[phone]
+            # Attach recent message metadata for refinement & display
+            p["sent_at"] = rec.get("sent_at", "")
+            if not p.get("route") and rec.get("route"):
+                p["route"] = rec.get("route")
+            if not p.get("platform") and rec.get("platform"):
+                p["platform"] = rec.get("platform")
+            if rec.get("template_name"):
+                p["template_name"] = rec.get("template_name")
+            effective_passengers.append(p)
+        else:
+            no_recent_msg_count += 1
+
+    if not effective_passengers:
+        flash(
+            f"No effective follow-up customers found in '{source_label}'. "
+            f"None of the {len(passengers)} fetched customers were sent a message within the previous {lookback_days} days.",
+            "warning",
+        )
+        return redirect(url_for("reviews"))
+
     pending = {
-        "passengers": passengers,
+        "passengers": effective_passengers,
         "stats": {
             "total_rows": total_rows,
             "cancelled":  parsed.get("cancelled_count", 0),
             "duplicates": parsed.get("duplicates_removed", 0),
             "invalid":    parsed.get("invalid_phones", 0),
             "opted_out":  opt_out_filtered,
-            "ready":      len(passengers),
+            "no_recent_msg": no_recent_msg_count,
+            "lookback_days": lookback_days,
+            "ready":      len(effective_passengers),
         },
         "filename": f"Review follow-up · {source_label}",
         "default_template": "review_followup",   # send_preview can pre-select
@@ -1630,11 +1685,11 @@ def _start_followup_batch(parsed, source_label):
     key = save_pending(pending)
     session["pending_key"] = key
     flash(
-        f"✓ Loaded {len(passengers)} customers from '{source_label}'. "
-        f"Pick your follow-up template below and send / schedule.",
+        f"✓ Found {len(effective_passengers)} effective follow-up customers from '{source_label}' "
+        f"(sent a message in the last {lookback_days} days). Filter & refine below before sending.",
         "success",
     )
-    return redirect(url_for("send_preview"))
+    return redirect(url_for("reviews_refine"))
 
 
 @app.route("/reviews/upload", methods=["POST"])
@@ -1645,6 +1700,7 @@ def reviews_upload():
         flash("Please pick a CSV or Excel file", "error")
         return redirect(url_for("reviews"))
     f = files[0]
+    lookback = _safe_int(request.form.get("recent_msg_days", "2"), default=2, minimum=1)
     try:
         raw = f.read()
         content = _read_tabular_file(f.filename, raw)
@@ -1652,7 +1708,7 @@ def reviews_upload():
     except Exception as e:
         flash(f"Failed to parse '{f.filename}': {e}", "error")
         return redirect(url_for("reviews"))
-    return _start_followup_batch(parsed, f.filename)
+    return _start_followup_batch(parsed, f.filename, lookback_days=lookback)
 
 
 @app.route("/reviews/fetch", methods=["POST"])
@@ -1662,9 +1718,13 @@ def reviews_fetch():
     if not gmail_fetch.is_configured():
         flash("Gmail not configured. Add address and App Password in Settings.", "error")
         return redirect(url_for("reviews"))
+
+    gmail_lookback = _safe_int(request.form.get("lookback_days", "14"), default=14, minimum=1)
+    sent_lookback  = _safe_int(request.form.get("recent_msg_days", "2"), default=2, minimum=1)
+
     try:
         emails = gmail_fetch.fetch_attachments(
-            since_days=_safe_int(request.form.get("lookback_days", "14"), default=14, minimum=1),
+            since_days=gmail_lookback,
             only_new=True,
             mark_seen=True,
         )
@@ -1694,7 +1754,7 @@ def reviews_fetch():
         flash(f"Failed to parse '{attach['filename']}': {e}", "error")
         return redirect(url_for("reviews"))
 
-    return _start_followup_batch(parsed, attach["filename"])
+    return _start_followup_batch(parsed, attach["filename"], lookback_days=sent_lookback)
 
 
 @app.route("/reviews/refine")

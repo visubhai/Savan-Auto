@@ -547,7 +547,7 @@ else:
         """Return one row per unique phone we've successfully sent to in the
         last `days` days. Each row is the latest message for that phone:
         { phone, name, route, platform, template_name, sent_at }.
-        Used by the Review Follow-up flow to compute non-reviewers.
+        Used by the Review Follow-up flow to compute effective follow-up targets.
         """
         cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
         match = {"sent_at": {"$gte": cutoff}}
@@ -575,7 +575,39 @@ else:
         rows = list(_db().messages.aggregate(pipeline))
         for r in rows:
             r.pop("_id", None)
-        return rows
+
+        recent_map = {r["phone"]: r for r in rows if r.get("phone")}
+
+        # Also include outbound chat messages from `chats` collection
+        try:
+            chat_pipeline = [
+                {"$match": {"direction": "out", "timestamp": {"$gte": cutoff}}},
+                {"$sort":  {"timestamp": DESCENDING}},
+                {"$group": {
+                    "_id":           "$phone",
+                    "phone":         {"$first": "$phone"},
+                    "name":          {"$first": "$customer_name"},
+                    "timestamp":     {"$first": "$timestamp"},
+                }},
+            ]
+            chats = list(_db().chats.aggregate(chat_pipeline))
+            for c in chats:
+                p = c.get("phone")
+                ts = c.get("timestamp")
+                if p and ts:
+                    if p not in recent_map or (recent_map[p].get("sent_at") or "") < ts:
+                        recent_map[p] = {
+                            "phone": p,
+                            "name": c.get("name") or "Customer",
+                            "route": "",
+                            "platform": "",
+                            "template_name": "Outbound Chat",
+                            "sent_at": ts,
+                        }
+        except Exception:
+            pass
+
+        return list(recent_map.values())
 
     # ── Dashboard stats ───────────────────────────────────────────────────────
 
