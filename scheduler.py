@@ -210,84 +210,124 @@ def send_batch(batch_id, passengers, template_name, user_id=None, fixed_params=N
         "current_name": "", "status": "running",
     }
 
-    for idx, p in enumerate(passengers):
-        # Build parameters — use passenger params if available, else fixed_params, else per-passenger data
-        if p.get("params") is not None:
-            params = list(p["params"][:var_count])
-            # Pad if not enough values provided
-            while len(params) < var_count:
-                params.append("—")
-        elif fixed_params is not None:
-            params = list(fixed_params[:var_count])
-            # Pad if not enough values provided
-            while len(params) < var_count:
-                params.append("—")
-        else:
-            ov = var_overrides or {}
-            # Follow-up templates need PLATFORM in {{1}} (e.g. "Aapne RedBus
-            # pe review nahi diya..."), while reminder templates need
-            # passenger NAME in {{1}}. Detect by template name and pick the
-            # right auto-source list per variable position.
-            is_followup = bool(template_name and "follow" in template_name.lower())
-            if is_followup:
-                auto_sources = [
-                    lambda p: p.get("platform") or "the platform",
-                    lambda p: p.get("name") or "Customer",
-                    lambda p: p.get("route") or "your journey",
-                ]
-            else:
-                auto_sources = [
-                    lambda p: p.get("name") or "Customer",
-                    lambda p: p.get("route") or "your journey",
-                    lambda p: p.get("platform") or "the platform",
-                ]
+    try:
+        for idx, p in enumerate(passengers):
+            phone = str(p.get("phone") or "").strip()
+            name = p.get("name", "")
+            route = p.get("route", "")
+            platform = p.get("platform", "")
+            if batch_id in RUNNING_BATCHES:
+                RUNNING_BATCHES[batch_id]["current_name"] = name or phone or "Customer"
+
+            # Check if message is sendable (phone number check)
+            clean_digits = "".join(filter(str.isdigit, phone))
+            if not clean_digits or len(clean_digits) < 10:
+                error_msg = f"Invalid or unsendeable phone number ('{phone}')"
+                try:
+                    log_message(
+                        batch_id, phone or "unknown", name, route,
+                        platform, template_name, "failed", error=error_msg,
+                        params=[]
+                    )
+                    update_batch_counts(batch_id, failed=1)
+                except Exception:
+                    pass
+                if batch_id in RUNNING_BATCHES:
+                    RUNNING_BATCHES[batch_id]["failed"] += 1
+                if idx < len(passengers) - 1:
+                    time.sleep(delay)
+                continue
 
             params = []
-            for i in range(1, var_count + 1):
-                fixed = ov.get(str(i)) or ov.get(i)
-                if fixed:
-                    # User-supplied fixed value for the whole batch
-                    params.append(str(fixed))
-                elif i <= len(auto_sources):
-                    params.append(auto_sources[i - 1](p))
+            try:
+                # Build parameters — use passenger params if available, else fixed_params, else per-passenger data
+                if p.get("params") is not None:
+                    params = list(p["params"][:var_count])
+                    while len(params) < var_count:
+                        params.append("—")
+                elif fixed_params is not None:
+                    params = list(fixed_params[:var_count])
+                    while len(params) < var_count:
+                        params.append("—")
                 else:
-                    # No auto source and no fixed value provided
-                    params.append("—")
+                    ov = var_overrides or {}
+                    is_followup = bool(template_name and "follow" in template_name.lower())
+                    if is_followup:
+                        auto_sources = [
+                            lambda p: p.get("platform") or "the platform",
+                            lambda p: p.get("name") or "Customer",
+                            lambda p: p.get("route") or "your journey",
+                        ]
+                    else:
+                        auto_sources = [
+                            lambda p: p.get("name") or "Customer",
+                            lambda p: p.get("route") or "your journey",
+                            lambda p: p.get("platform") or "the platform",
+                        ]
 
-        RUNNING_BATCHES[batch_id]["current_name"] = p.get("name", "")
+                    for i in range(1, var_count + 1):
+                        fixed = ov.get(str(i)) or ov.get(i)
+                        if fixed:
+                            params.append(str(fixed))
+                        elif i <= len(auto_sources):
+                            params.append(auto_sources[i - 1](p))
+                        else:
+                            params.append("—")
 
-        success, result = api.send_template(
-            p["phone"], template_name, language, params,
-            header_type=template.get("header_type"),
-            header_example=template.get("header_example"),
-            header_media_id=final_header_media_id,
-        )
+                success, result = api.send_template(
+                    clean_digits, template_name, language, params,
+                    header_type=template.get("header_type"),
+                    header_example=template.get("header_example"),
+                    header_media_id=final_header_media_id,
+                )
 
-        if success:
-            log_message(
-                batch_id, p["phone"], p.get("name"), p.get("route"),
-                p.get("platform"), template_name, "sent", wa_msg_id=result,
-                params=params
-            )
-            upsert_customer(p["phone"], p.get("name"),
-                            p.get("route"), p.get("platform"))
-            update_batch_counts(batch_id, sent=1)
-            RUNNING_BATCHES[batch_id]["sent"] += 1
-        else:
-            log_message(
-                batch_id, p["phone"], p.get("name"), p.get("route"),
-                p.get("platform"), template_name, "failed", error=result,
-                params=params
-            )
-            update_batch_counts(batch_id, failed=1)
-            RUNNING_BATCHES[batch_id]["failed"] += 1
+                if success:
+                    log_message(
+                        batch_id, clean_digits, name, route,
+                        platform, template_name, "sent", wa_msg_id=result,
+                        params=params
+                    )
+                    try:
+                        upsert_customer(clean_digits, name, route, platform)
+                    except Exception:
+                        pass
+                    update_batch_counts(batch_id, sent=1)
+                    if batch_id in RUNNING_BATCHES:
+                        RUNNING_BATCHES[batch_id]["sent"] += 1
+                else:
+                    log_message(
+                        batch_id, clean_digits, name, route,
+                        platform, template_name, "failed", error=str(result or "Message not sendable"),
+                        params=params
+                    )
+                    update_batch_counts(batch_id, failed=1)
+                    if batch_id in RUNNING_BATCHES:
+                        RUNNING_BATCHES[batch_id]["failed"] += 1
 
-        # Throttle
-        if idx < len(passengers) - 1:
-            time.sleep(delay)
+            except Exception as e:
+                err_str = f"Error sending message: {str(e)}"
+                try:
+                    log_message(
+                        batch_id, clean_digits or phone or "unknown", name, route,
+                        platform, template_name, "failed", error=err_str,
+                        params=params
+                    )
+                    update_batch_counts(batch_id, failed=1)
+                except Exception:
+                    pass
+                if batch_id in RUNNING_BATCHES:
+                    RUNNING_BATCHES[batch_id]["failed"] += 1
 
-    complete_batch(batch_id)
-    RUNNING_BATCHES[batch_id]["status"] = "completed"
+            # Throttle
+            if idx < len(passengers) - 1:
+                time.sleep(delay)
+    except Exception as outer_err:
+        if batch_id in RUNNING_BATCHES:
+            RUNNING_BATCHES[batch_id]["error"] = str(outer_err)
+    finally:
+        complete_batch(batch_id)
+        if batch_id in RUNNING_BATCHES:
+            RUNNING_BATCHES[batch_id]["status"] = "completed"
 
 
 def start_send_thread(passengers, template_name, batch_name, user_id, fixed_params=None,

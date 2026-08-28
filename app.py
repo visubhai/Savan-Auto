@@ -576,121 +576,38 @@ def send_preview():
 
     # Calculate route counts and sent history for filtering
     from collections import Counter
-    import re
-    from parsers import clean_phone as _cp
-
-    def _get_phone_variants(phone_raw):
-        if not phone_raw:
-            return []
-        clean = _cp(phone_raw) or str(phone_raw).strip()
-        digits = re.sub(r"\D", "", str(phone_raw))
-        v = {clean, digits}
-        if clean and clean.startswith("91") and len(clean) == 12:
-            v.add(clean[2:])
-        if digits and not digits.startswith("91") and len(digits) == 10:
-            v.add("91" + digits)
-        return [x for x in v if x]
-
     routes_counter = Counter(p.get("route") or "Unspecified" for p in pending["passengers"])
     route_counts = sorted(routes_counter.items(), key=lambda x: (-x[1], x[0]))
 
-    all_query_phones = set()
-    for p in pending["passengers"]:
-        all_query_phones.update(_get_phone_variants(p.get("phone")))
-
+    phones = [p["phone"] for p in pending["passengers"] if p.get("phone")]
     sent_rows = list(db._db().messages.find(
-        {"customer_phone": {"$in": list(all_query_phones)}, "status": {"$in": ["sent", "delivered", "read"]}},
+        {"customer_phone": {"$in": phones}, "status": {"$in": ["sent", "delivered", "read"]}},
         {"customer_phone": 1, "sent_at": 1}
     ))
-    sent_db_phones = set()
-    for r in sent_rows:
-        cp = r.get("customer_phone")
-        if cp:
-            sent_db_phones.update(_get_phone_variants(cp))
-
+    sent_phones = {r["customer_phone"] for r in sent_rows}
     already_sent_count = 0
     for p in pending["passengers"]:
-        p_variants = _get_phone_variants(p.get("phone"))
-        is_sent = any(v in sent_db_phones for v in p_variants)
+        is_sent = p.get("phone") in sent_phones
         p["already_sent"] = is_sent
         if is_sent:
             already_sent_count += 1
 
-    active_target_count = already_sent_count if already_sent_count > 0 else len(pending["passengers"])
     cost_per = float(db.get_setting("cost_per_message", "0.12"))
-    estimated_cost = round(active_target_count * cost_per, 2)
+    estimated_cost = round(len(pending["passengers"]) * cost_per, 2)
     delay = float(db.get_setting("delay_between_messages", "1.5"))
-    estimated_mins = round(active_target_count * delay / 60, 1)
+    estimated_mins = round(len(pending["passengers"]) * delay / 60, 1)
 
     # FIX 7: flag large batches for extra confirmation
-    needs_confirm = active_target_count > 200
-
-    interrupted_batch = get_interrupted_batch()
+    needs_confirm = len(pending["passengers"]) > 200
 
     return render_template("send_preview.html",
                            pending=pending, templates=templates,
                            default_tpl=default_tpl,
                            route_counts=route_counts,
                            already_sent_count=already_sent_count,
-                           interrupted_batch=interrupted_batch,
                            estimated_cost=estimated_cost,
                            estimated_mins=estimated_mins,
                            needs_confirm=needs_confirm)
-
-def get_interrupted_batch():
-    try:
-        db_inst = db._db()
-        batch = db_inst.batches.find_one({"status": "running"}, sort=[("_id", -1)])
-        if not batch:
-            return None
-        batch_id = int(batch.get("id") or batch.get("_id"))
-        total = int(batch.get("total_count", 0))
-        sent_count = db_inst.messages.count_documents({
-            "batch_id": batch_id,
-            "status": {"$in": ["sent", "delivered", "read"]}
-        })
-        remaining = max(0, total - sent_count)
-        if remaining == 0:
-            db_inst.batches.update_one({"_id": batch["_id"]}, {"$set": {"status": "completed"}})
-            return None
-        return {
-            "batch_id": batch_id,
-            "name": batch.get("name", f"Batch #{batch_id}"),
-            "total": total,
-            "sent": sent_count,
-            "remaining": remaining,
-        }
-    except Exception:
-        return None
-
-@app.route("/send/resume/<int:batch_id>", methods=["GET", "POST"])
-@login_required
-def send_resume(batch_id):
-    """
-    Resumes an interrupted batch by filtering out passengers who were already sent.
-    """
-    db_inst = db._db()
-    sent_msgs = list(db_inst.messages.find(
-        {"batch_id": int(batch_id), "status": {"$in": ["sent", "delivered", "read"]}},
-        {"customer_phone": 1}
-    ))
-    sent_phones = {m.get("customer_phone") for m in sent_msgs if m.get("customer_phone")}
-
-    key = session.get("pending_key")
-    pending = load_pending(key)
-    if not pending or not pending.get("passengers"):
-        flash("Please re-upload your CSV file. The 8 already-sent customers will be automatically skipped.", "info")
-        return redirect(url_for("send"))
-
-    remaining = [p for p in pending["passengers"] if p.get("phone") not in sent_phones]
-    pending["passengers"] = remaining
-    pending["stats"]["ready"] = len(remaining)
-    pending["stats"]["total_rows"] = len(remaining)
-    save_pending(pending, key)
-
-    db_inst.batches.update_one({"id": int(batch_id)}, {"$set": {"status": "interrupted"}})
-    flash(f"✓ Resumed Batch #{batch_id}: Skipped {len(sent_phones)} already sent. {len(remaining)} remaining customers ready to send.", "success")
-    return redirect(url_for("send_preview"))
 
 
 @app.route("/send/start", methods=["POST"])
@@ -1730,12 +1647,6 @@ def _start_followup_batch(parsed, source_label, lookback_days=2):
         phone = p["phone"]
         if phone in recent_map:
             rec = recent_map[phone]
-            rec_tpl = (rec.get("template_name") or "").lower()
-            # Skip customers who ALREADY received a review follow-up message
-            if "follow" in rec_tpl:
-                no_recent_msg_count += 1
-                continue
-
             # Attach recent message metadata for refinement & display
             p["sent_at"] = rec.get("sent_at", "")
             if not p.get("route") and rec.get("route"):

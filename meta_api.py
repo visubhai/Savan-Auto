@@ -57,6 +57,11 @@ class WhatsAppAPI:
         header_example:   Fallback URL (kept for back-compat).
         Returns: (success: bool, message_id_or_error: str)
         """
+        clean_phone = "".join(filter(str.isdigit, str(to_phone or "")))
+        if not clean_phone or len(clean_phone) < 10:
+            return False, f"Invalid or unsendeable phone number ('{to_phone}')"
+        to_phone = clean_phone
+
         url = f"{self.base_url}/{self.phone_number_id}/messages"
         components = []
 
