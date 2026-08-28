@@ -625,14 +625,72 @@ def send_preview():
     # FIX 7: flag large batches for extra confirmation
     needs_confirm = active_target_count > 200
 
+    interrupted_batch = get_interrupted_batch()
+
     return render_template("send_preview.html",
                            pending=pending, templates=templates,
                            default_tpl=default_tpl,
                            route_counts=route_counts,
                            already_sent_count=already_sent_count,
+                           interrupted_batch=interrupted_batch,
                            estimated_cost=estimated_cost,
                            estimated_mins=estimated_mins,
                            needs_confirm=needs_confirm)
+
+def get_interrupted_batch():
+    try:
+        db_inst = db._db()
+        batch = db_inst.batches.find_one({"status": "running"}, sort=[("_id", -1)])
+        if not batch:
+            return None
+        batch_id = int(batch.get("id") or batch.get("_id"))
+        total = int(batch.get("total_count", 0))
+        sent_count = db_inst.messages.count_documents({
+            "batch_id": batch_id,
+            "status": {"$in": ["sent", "delivered", "read"]}
+        })
+        remaining = max(0, total - sent_count)
+        if remaining == 0:
+            db_inst.batches.update_one({"_id": batch["_id"]}, {"$set": {"status": "completed"}})
+            return None
+        return {
+            "batch_id": batch_id,
+            "name": batch.get("name", f"Batch #{batch_id}"),
+            "total": total,
+            "sent": sent_count,
+            "remaining": remaining,
+        }
+    except Exception:
+        return None
+
+@app.route("/send/resume/<int:batch_id>", methods=["GET", "POST"])
+@login_required
+def send_resume(batch_id):
+    """
+    Resumes an interrupted batch by filtering out passengers who were already sent.
+    """
+    db_inst = db._db()
+    sent_msgs = list(db_inst.messages.find(
+        {"batch_id": int(batch_id), "status": {"$in": ["sent", "delivered", "read"]}},
+        {"customer_phone": 1}
+    ))
+    sent_phones = {m.get("customer_phone") for m in sent_msgs if m.get("customer_phone")}
+
+    key = session.get("pending_key")
+    pending = load_pending(key)
+    if not pending or not pending.get("passengers"):
+        flash("Please re-upload your CSV file. The 8 already-sent customers will be automatically skipped.", "info")
+        return redirect(url_for("send"))
+
+    remaining = [p for p in pending["passengers"] if p.get("phone") not in sent_phones]
+    pending["passengers"] = remaining
+    pending["stats"]["ready"] = len(remaining)
+    pending["stats"]["total_rows"] = len(remaining)
+    save_pending(pending, key)
+
+    db_inst.batches.update_one({"id": int(batch_id)}, {"$set": {"status": "interrupted"}})
+    flash(f"✓ Resumed Batch #{batch_id}: Skipped {len(sent_phones)} already sent. {len(remaining)} remaining customers ready to send.", "success")
+    return redirect(url_for("send_preview"))
 
 
 @app.route("/send/start", methods=["POST"])
@@ -1672,6 +1730,12 @@ def _start_followup_batch(parsed, source_label, lookback_days=2):
         phone = p["phone"]
         if phone in recent_map:
             rec = recent_map[phone]
+            rec_tpl = (rec.get("template_name") or "").lower()
+            # Skip customers who ALREADY received a review follow-up message
+            if "follow" in rec_tpl:
+                no_recent_msg_count += 1
+                continue
+
             # Attach recent message metadata for refinement & display
             p["sent_at"] = rec.get("sent_at", "")
             if not p.get("route") and rec.get("route"):

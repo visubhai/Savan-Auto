@@ -92,7 +92,7 @@
       <div class="chk-list" id="tplList">
         {% for name, n in template_counts %}
         <label class="chk">
-          <input type="checkbox" class="f-tpl" value="{{ name }}" checked>
+          <input type="checkbox" class="f-tpl" value="{{ name }}" {% if 'follow' not in name.lower() %}checked{% endif %}>
           <span>{{ name }}</span><span class="count">{{ n }}</span>
         </label>
         {% endfor %}
