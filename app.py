@@ -576,29 +576,54 @@ def send_preview():
 
     # Calculate route counts and sent history for filtering
     from collections import Counter
+    import re
+    from parsers import clean_phone as _cp
+
+    def _get_phone_variants(phone_raw):
+        if not phone_raw:
+            return []
+        clean = _cp(phone_raw) or str(phone_raw).strip()
+        digits = re.sub(r"\D", "", str(phone_raw))
+        v = {clean, digits}
+        if clean and clean.startswith("91") and len(clean) == 12:
+            v.add(clean[2:])
+        if digits and not digits.startswith("91") and len(digits) == 10:
+            v.add("91" + digits)
+        return [x for x in v if x]
+
     routes_counter = Counter(p.get("route") or "Unspecified" for p in pending["passengers"])
     route_counts = sorted(routes_counter.items(), key=lambda x: (-x[1], x[0]))
 
-    phones = [p["phone"] for p in pending["passengers"] if p.get("phone")]
+    all_query_phones = set()
+    for p in pending["passengers"]:
+        all_query_phones.update(_get_phone_variants(p.get("phone")))
+
     sent_rows = list(db._db().messages.find(
-        {"customer_phone": {"$in": phones}, "status": {"$in": ["sent", "delivered", "read"]}},
+        {"customer_phone": {"$in": list(all_query_phones)}, "status": {"$in": ["sent", "delivered", "read"]}},
         {"customer_phone": 1, "sent_at": 1}
     ))
-    sent_phones = {r["customer_phone"] for r in sent_rows}
+    sent_db_phones = set()
+    for r in sent_rows:
+        cp = r.get("customer_phone")
+        if cp:
+            sent_db_phones.update(_get_phone_variants(cp))
+
     already_sent_count = 0
     for p in pending["passengers"]:
-        is_sent = p.get("phone") in sent_phones
+        p_variants = _get_phone_variants(p.get("phone"))
+        is_sent = any(v in sent_db_phones for v in p_variants)
         p["already_sent"] = is_sent
         if is_sent:
             already_sent_count += 1
 
+    active_target_count = already_sent_count if already_sent_count > 0 else len(pending["passengers"])
     cost_per = float(db.get_setting("cost_per_message", "0.12"))
-    estimated_cost = round(len(pending["passengers"]) * cost_per, 2)
+    estimated_cost = round(active_target_count * cost_per, 2)
     delay = float(db.get_setting("delay_between_messages", "1.5"))
-    estimated_mins = round(len(pending["passengers"]) * delay / 60, 1)
+    estimated_mins = round(active_target_count * delay / 60, 1)
 
     # FIX 7: flag large batches for extra confirmation
-    needs_confirm = len(pending["passengers"]) > 200
+    needs_confirm = active_target_count > 200
 
     return render_template("send_preview.html",
                            pending=pending, templates=templates,
