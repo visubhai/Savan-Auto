@@ -543,7 +543,7 @@ else:
             {"status": {"$in": ["sent", "delivered", "read"]}, "sent_at": {"$gte": cutoff}},
         ))
 
-    def get_recent_recipients(days=30, template_name=None, status="sent"):
+    def get_recent_recipients(days=30, template_name=None, status="sent", phones=None):
         """Return one row per unique phone we've successfully sent to in the
         last `days` days. Each row is the latest message for that phone:
         { phone, name, route, platform, template_name, sent_at }.
@@ -551,6 +551,9 @@ else:
         """
         cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
         match = {"sent_at": {"$gte": cutoff}}
+        valid_phones = [str(p).strip() for p in phones if p] if phones else None
+        if valid_phones:
+            match["customer_phone"] = {"$in": list(set(valid_phones))}
         if status:
             if status == "sent":
                 match["status"] = {"$in": ["sent", "delivered", "read"]}
@@ -570,7 +573,6 @@ else:
                 "template_name":  {"$first": "$template_name"},
                 "sent_at":        {"$first": "$sent_at"},
             }},
-            {"$sort": {"sent_at": DESCENDING}},
         ]
         rows = list(_db().messages.aggregate(pipeline))
         for r in rows:
@@ -580,8 +582,11 @@ else:
 
         # Also include outbound chat messages from `chats` collection
         try:
+            chat_match = {"direction": "out", "timestamp": {"$gte": cutoff}}
+            if valid_phones:
+                chat_match["phone"] = {"$in": list(set(valid_phones))}
             chat_pipeline = [
-                {"$match": {"direction": "out", "timestamp": {"$gte": cutoff}}},
+                {"$match": chat_match},
                 {"$sort":  {"timestamp": DESCENDING}},
                 {"$group": {
                     "_id":           "$phone",

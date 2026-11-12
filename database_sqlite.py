@@ -682,11 +682,12 @@ def get_unique_conversations(days=7):
         return row["c"] if row else 0
 
 
-def get_recent_recipients(days=30, template_name=None, status="sent"):
+def get_recent_recipients(days=30, template_name=None, status="sent", phones=None):
     """One row per unique phone we've successfully sent to in the last
     `days` days, with the latest message's metadata.
     """
     cutoff = (now_ist() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
+    valid_phones = [str(p).strip() for p in phones if p] if phones else None
     sql = (
         "SELECT customer_phone AS phone, "
         "       sent_at, "
@@ -699,6 +700,10 @@ def get_recent_recipients(days=30, template_name=None, status="sent"):
         "  WHERE sent_at >= ? "
     )
     params = [cutoff]
+    if valid_phones:
+        placeholders = ",".join("?" for _ in valid_phones)
+        sql += f" AND customer_phone IN ({placeholders})"
+        params.extend(valid_phones)
     if status:
         if status == "sent":
             sql += " AND status IN ('sent', 'delivered', 'read')"
@@ -715,10 +720,16 @@ def get_recent_recipients(days=30, template_name=None, status="sent"):
 
     recent_map = {r["phone"]: r for r in rows if r.get("phone")}
 
-    chat_sql = "SELECT phone, MAX(timestamp) as sent_at, customer_name as name FROM chat_messages WHERE direction='out' AND timestamp >= ? GROUP BY phone"
+    chat_sql = "SELECT phone, MAX(timestamp) as sent_at, customer_name as name FROM chat_messages WHERE direction='out' AND timestamp >= ?"
+    chat_params = [cutoff]
+    if valid_phones:
+        placeholders = ",".join("?" for _ in valid_phones)
+        chat_sql += f" AND phone IN ({placeholders})"
+        chat_params.extend(valid_phones)
+    chat_sql += " GROUP BY phone"
     try:
         with get_db() as db:
-            chats = [dict(r) for r in db.execute(chat_sql, [cutoff]).fetchall()]
+            chats = [dict(r) for r in db.execute(chat_sql, chat_params).fetchall()]
             for c in chats:
                 p = c.get("phone")
                 ts = c.get("sent_at")

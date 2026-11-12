@@ -1631,24 +1631,31 @@ def _start_followup_batch(parsed, source_label, lookback_days=2):
         return redirect(url_for("reviews"))
 
     # 1. Respect opt-outs (same as the main Send flow)
-    opted_out_phones = {r["phone"] for r in db.search_customers(opted_out=True, limit=50000)}
+    opted_out_phones = {r.get("phone") for r in db.search_customers(opted_out=True, limit=50000) if r.get("phone")}
     before = len(passengers)
-    passengers = [p for p in passengers if p["phone"] not in opted_out_phones]
+    passengers = [p for p in passengers if p.get("phone") and p["phone"] not in opted_out_phones]
     opt_out_filtered = before - len(passengers)
 
     # 2. Check sent message history within the previous `lookback_days` (default 2 days)
-    recent_recipients = db.get_recent_recipients(days=lookback_days)
+    phones = [p["phone"] for p in passengers if p.get("phone")]
+    recent_recipients = db.get_recent_recipients(days=lookback_days, phones=phones)
     recent_map = {r["phone"]: r for r in recent_recipients if r.get("phone")}
 
     effective_passengers = []
     no_recent_msg_count = 0
 
     for p in passengers:
-        phone = p["phone"]
+        phone = p.get("phone")
         if phone in recent_map:
             rec = recent_map[phone]
+            rec_tpl = (rec.get("template_name") or "").lower()
+            # Skip customers who ALREADY received a review follow-up message
+            if "follow" in rec_tpl:
+                no_recent_msg_count += 1
+                continue
+
             # Attach recent message metadata for refinement & display
-            p["sent_at"] = rec.get("sent_at", "")
+            p["sent_at"] = str(rec.get("sent_at") or "")
             if not p.get("route") and rec.get("route"):
                 p["route"] = rec.get("route")
             if not p.get("platform") and rec.get("platform"):
@@ -1708,13 +1715,20 @@ def reviews_upload():
     except Exception as e:
         flash(f"Failed to parse '{f.filename}': {e}", "error")
         return redirect(url_for("reviews"))
-    return _start_followup_batch(parsed, f.filename, lookback_days=lookback)
+    try:
+        return _start_followup_batch(parsed, f.filename, lookback_days=lookback)
+    except Exception as e:
+        flash(f"Error processing follow-up batch: {e}", "error")
+        return redirect(url_for("reviews"))
 
 
-@app.route("/reviews/fetch", methods=["POST"])
+@app.route("/reviews/fetch", methods=["GET", "POST"])
 @login_required
 def reviews_fetch():
     """Pull the next unread matching email from Gmail and start the follow-up batch."""
+    if request.method == "GET":
+        return redirect(url_for("reviews"))
+
     if not gmail_fetch.is_configured():
         flash("Gmail not configured. Add address and App Password in Settings.", "error")
         return redirect(url_for("reviews"))
@@ -1754,7 +1768,11 @@ def reviews_fetch():
         flash(f"Failed to parse '{attach['filename']}': {e}", "error")
         return redirect(url_for("reviews"))
 
-    return _start_followup_batch(parsed, attach["filename"], lookback_days=sent_lookback)
+    try:
+        return _start_followup_batch(parsed, attach["filename"], lookback_days=sent_lookback)
+    except Exception as e:
+        flash(f"Error processing follow-up batch: {e}", "error")
+        return redirect(url_for("reviews"))
 
 
 @app.route("/reviews/refine")
