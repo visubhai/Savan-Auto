@@ -748,7 +748,7 @@ else:
         docs.reverse()
         return _clean_many(docs)
 
-    def list_conversations(limit=50, filter_type=None):
+    def list_conversations(limit=50, filter_type=None, offset=0):
         pipeline = [
             {"$sort": {"timestamp": DESCENDING}},
             {"$group": {
@@ -789,8 +789,10 @@ else:
             pipeline.append({"$match": {"last_inbound_timestamp": {"$gte": cutoff}}})
 
         pipeline.append({"$sort": {"timestamp": DESCENDING}})
+        if offset:
+            pipeline.append({"$skip": int(offset)})
         if limit:
-            pipeline.append({"$limit": limit})
+            pipeline.append({"$limit": int(limit)})
 
         convos = list(_db().chats.aggregate(pipeline))
         for c in convos:

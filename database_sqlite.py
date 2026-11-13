@@ -895,7 +895,7 @@ def get_conversation(phone, limit=100):
         return rows[::-1]
 
 
-def list_conversations(limit=50, filter_type=None):
+def list_conversations(limit=50, filter_type=None, offset=0):
     """One row per phone: latest message, unread count, customer name."""
     having_clause = ""
     if filter_type == "unread":
@@ -914,9 +914,9 @@ def list_conversations(limit=50, filter_type=None):
                GROUP BY c.phone
                {having_clause}
                ORDER BY c.timestamp DESC
-               LIMIT ?"""
+               LIMIT ? OFFSET ?"""
     with get_db() as db:
-        return db.execute(sql, (limit,)).fetchall()
+        return db.execute(sql, (int(limit), int(offset))).fetchall()
 
 
 def mark_read(phone):

@@ -218,6 +218,13 @@
         </div>
       {% endif %}
     </div>
+
+    <!-- Load more button at bottom of list -->
+    <div id="loadMoreWrap" style="padding:10px 14px;text-align:center;border-top:1px solid var(--border);display:{% if conversations|length >= current_limit|default(50) %}block{% else %}none{% endif %};background:#fff;">
+      <button type="button" id="loadMoreBtn" class="btn btn-ghost btn-sm" style="width:100%;font-size:12px;font-weight:700;color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;cursor:pointer;" onclick="loadMoreConversations()">
+        ↓ Load More Conversations ({{ conversations|length }} loaded)
+      </button>
+    </div>
   </div>
 
   <!-- ── Chat window ── -->
@@ -234,6 +241,35 @@ var ACTIVE_PHONE = "{{ active_phone or '' }}";
 // last_chat_id is the max integer id of real chat messages (bulk-only history → 0)
 var lastMsgId    = Number("{{ last_chat_id|default(0) }}");
 var pollTimer    = null;
+var CURRENT_LIMIT = Number("{{ current_limit|default(50) }}");
+var DEFAULT_STEP  = 50;
+
+function loadMoreConversations() {
+  var btn = document.getElementById('loadMoreBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Loading more…';
+  }
+
+  CURRENT_LIMIT += DEFAULT_STEP;
+
+  var reqUrl = '/api/inbox/conversations?filter=' + encodeURIComponent(CURRENT_FILTER) +
+               '&limit=' + CURRENT_LIMIT +
+               (ACTIVE_PHONE ? '&phone=' + encodeURIComponent(ACTIVE_PHONE) : '');
+
+  fetch(reqUrl)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      renderConvosList(data);
+    })
+    .catch(function(e) {
+      console.error('Failed to load more conversations:', e);
+      if (btn) btn.textContent = '↓ Load More Conversations';
+    })
+    .finally(function() {
+      if (btn) btn.disabled = false;
+    });
+}
 
 /* ── Dynamic Conversation Switching without page reload ── */
 function selectConversation(phone) {
@@ -651,6 +687,7 @@ var CURRENT_FILTER = "{{ current_filter|default('all') }}";
 
 function setInboxFilter(filter) {
   CURRENT_FILTER = filter;
+  CURRENT_LIMIT  = DEFAULT_STEP;
   
   // Update button active classes
   document.getElementById('filterBtnAll')?.classList.toggle('active', filter === 'all');
@@ -675,7 +712,9 @@ function setInboxFilter(filter) {
   var body = document.getElementById('convListBody');
   if (body) body.style.opacity = '0.5';
 
-  var reqUrl = '/api/inbox/conversations?filter=' + encodeURIComponent(filter) + (ACTIVE_PHONE ? '&phone=' + encodeURIComponent(ACTIVE_PHONE) : '');
+  var reqUrl = '/api/inbox/conversations?filter=' + encodeURIComponent(filter) +
+               '&limit=' + CURRENT_LIMIT +
+               (ACTIVE_PHONE ? '&phone=' + encodeURIComponent(ACTIVE_PHONE) : '');
   fetch(reqUrl)
     .then(function(r) { return r.json(); })
     .then(function(data) {
@@ -889,15 +928,33 @@ function renderConvosList(conversations) {
       emptyMsg = 'No conversations match "<b>' + escHtml(ql) + '</b>"';
     }
     container.innerHTML = '<div class="conv-empty">' + emptyMsg + '</div>';
+    var loadWrap = document.getElementById('loadMoreWrap');
+    if (loadWrap) loadWrap.style.display = 'none';
     return;
   }
 
   container.innerHTML = html;
+
+  // Update Load More button state
+  var loadWrap = document.getElementById('loadMoreWrap');
+  var loadBtn  = document.getElementById('loadMoreBtn');
+  if (loadWrap) {
+    if (conversations && conversations.length >= CURRENT_LIMIT) {
+      loadWrap.style.display = 'block';
+      if (loadBtn) {
+        loadBtn.textContent = '↓ Load More Conversations (' + conversations.length + ' loaded)';
+      }
+    } else {
+      loadWrap.style.display = 'none';
+    }
+  }
 }
 
 function pollConversationsList() {
   if (document.hidden) return;
-  var reqUrl = '/api/inbox/conversations?filter=' + encodeURIComponent(CURRENT_FILTER) + (ACTIVE_PHONE ? '&phone=' + encodeURIComponent(ACTIVE_PHONE) : '');
+  var reqUrl = '/api/inbox/conversations?filter=' + encodeURIComponent(CURRENT_FILTER) +
+               '&limit=' + CURRENT_LIMIT +
+               (ACTIVE_PHONE ? '&phone=' + encodeURIComponent(ACTIVE_PHONE) : '');
   fetch(reqUrl)
     .then(function(r) { return r.json(); })
     .then(function(data) {

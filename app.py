@@ -2235,8 +2235,9 @@ def inbox():
     if filter_type not in ["all", "open", "unread"]:
         filter_type = "all"
 
-    limit = 200 if filter_type == "unread" else 60
-    conversations = db.list_conversations(limit=limit, filter_type=filter_type)
+    limit = min(1000, _safe_int(request.args.get("limit", "50"), default=50, minimum=10))
+    offset = _safe_int(request.args.get("offset", "0"), default=0, minimum=0)
+    conversations = db.list_conversations(limit=limit, filter_type=filter_type, offset=offset)
     raw_phone     = request.args.get("phone", "").strip()
     active_phone  = ""
     if raw_phone:
@@ -2355,7 +2356,8 @@ def inbox():
                            templates=templates,
                            last_chat_id=last_chat_id,
                            current_filter=filter_type,
-                           unread_count=unread_count)
+                           unread_count=unread_count,
+                           current_limit=limit)
 
 
 @app.route("/inbox/chat/<phone>")
@@ -2565,8 +2567,9 @@ def api_inbox_conversations():
     if filter_type not in ["all", "open", "unread"]:
         filter_type = "all"
 
-    limit = 200 if filter_type == "unread" else 60
-    conversations = db.list_conversations(limit=limit, filter_type=filter_type)
+    limit = min(1000, _safe_int(request.args.get("limit", "50"), default=50, minimum=10))
+    offset = _safe_int(request.args.get("offset", "0"), default=0, minimum=0)
+    conversations = db.list_conversations(limit=limit, filter_type=filter_type, offset=offset)
     conversations = [dict(c) for c in conversations]
 
     active_phone = request.args.get("phone", "").strip()
