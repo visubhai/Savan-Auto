@@ -787,6 +787,12 @@ document.querySelectorAll('.drop-zone').forEach(zone => {
         badgeMobile.textContent = text;
         badgeMobile.style.display = show;
       }
+
+      var filterBadge = document.getElementById('unreadFilterBadge');
+      if (filterBadge) {
+        filterBadge.textContent = text;
+        filterBadge.style.display = show;
+      }
     }).catch(function(){});
   }
   pollUnread();

@@ -44,7 +44,7 @@ if not MONGO_URI:
         create_campaign, list_campaigns, get_campaign, update_campaign,
         update_campaign_last_used, delete_campaign,
         update_campaign_image, clear_campaign_image,
-        save_chat_message, get_conversation, list_conversations, mark_read,
+        save_chat_message, get_conversation, list_conversations, mark_read, mark_all_read,
         delete_conversation, count_recent_outbound,
         get_unread_count, update_chat_status, get_new_messages,
         change_user_password, delete_user,
@@ -748,10 +748,7 @@ else:
         docs.reverse()
         return _clean_many(docs)
 
-    def list_conversations(limit=50):
-        # Single aggregation — was previously 1 aggregation + N count_documents
-        # queries (one per conversation) which on Atlas with 50 conversations
-        # cost ~5 seconds in round trips. Now it's one round trip.
+    def list_conversations(limit=50, filter_type=None):
         pipeline = [
             {"$sort": {"timestamp": DESCENDING}},
             {"$group": {
@@ -784,9 +781,17 @@ else:
                     }
                 },
             }},
-            {"$sort": {"timestamp": DESCENDING}},
-            {"$limit": limit},
         ]
+        if filter_type == "unread":
+            pipeline.append({"$match": {"unread": {"$gt": 0}}})
+        elif filter_type == "open":
+            cutoff = (now_ist() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+            pipeline.append({"$match": {"last_inbound_timestamp": {"$gte": cutoff}}})
+
+        pipeline.append({"$sort": {"timestamp": DESCENDING}})
+        if limit:
+            pipeline.append({"$limit": limit})
+
         convos = list(_db().chats.aggregate(pipeline))
         for c in convos:
             c.pop("_id", None)
@@ -797,6 +802,13 @@ else:
             {"phone": phone, "direction": "in"},
             {"$set": {"read": 1}},
         )
+
+    def mark_all_read():
+        res = _db().chats.update_many(
+            {"direction": "in", "read": 0},
+            {"$set": {"read": 1}},
+        )
+        return res.modified_count
 
     def delete_conversation(phone):
         """Delete all chat messages for one phone number (entire conversation)."""

@@ -2231,7 +2231,12 @@ def webhook_receive():
 @app.route("/inbox")
 @login_required
 def inbox():
-    conversations = db.list_conversations(50)
+    filter_type = request.args.get("filter", "all").strip().lower()
+    if filter_type not in ["all", "open", "unread"]:
+        filter_type = "all"
+
+    limit = 200 if filter_type == "unread" else 60
+    conversations = db.list_conversations(limit=limit, filter_type=filter_type)
     raw_phone     = request.args.get("phone", "").strip()
     active_phone  = ""
     if raw_phone:
@@ -2308,6 +2313,22 @@ def inbox():
             last_chat_id = mid
 
     conversations = [dict(c) for c in conversations]
+
+    # Ensure active_phone is present in the conversation list even if filtered
+    if active_phone and not any(c.get("phone") == active_phone for c in conversations):
+        active_chats = list(db.get_conversation(active_phone, 1))
+        if active_chats:
+            ac = dict(active_chats[0])
+            conversations.insert(0, {
+                "phone": active_phone,
+                "customer_name": ac.get("customer_name") or active_phone,
+                "content": ac.get("content", ""),
+                "direction": ac.get("direction", "out"),
+                "timestamp": ac.get("timestamp", ""),
+                "message_type": ac.get("message_type", "text"),
+                "unread": 0,
+                "last_inbound_timestamp": ac.get("timestamp") if ac.get("direction") == "in" else None,
+            })
     
     from datetime import datetime, timedelta, timezone
     IST = timezone(timedelta(hours=5, minutes=30))
@@ -2324,13 +2345,17 @@ def inbox():
             except Exception:
                 pass
 
+    unread_count = db.get_unread_count()
+
     return render_template("inbox.html",
                            conversations=conversations,
                            active_phone=active_phone,
                            messages=messages,
                            customer_name=customer_name,
                            templates=templates,
-                           last_chat_id=last_chat_id)
+                           last_chat_id=last_chat_id,
+                           current_filter=filter_type,
+                           unread_count=unread_count)
 
 
 @app.route("/inbox/chat/<phone>")
@@ -2536,13 +2561,34 @@ def inbox_unread():
 @app.route("/api/inbox/conversations")
 @login_required
 def api_inbox_conversations():
-    conversations = db.list_conversations(50)
+    filter_type = request.args.get("filter", "all").strip().lower()
+    if filter_type not in ["all", "open", "unread"]:
+        filter_type = "all"
+
+    limit = 200 if filter_type == "unread" else 60
+    conversations = db.list_conversations(limit=limit, filter_type=filter_type)
     conversations = [dict(c) for c in conversations]
-    
+
+    active_phone = request.args.get("phone", "").strip()
+    if active_phone and not any(c.get("phone") == active_phone for c in conversations):
+        active_chats = list(db.get_conversation(active_phone, 1))
+        if active_chats:
+            ac = dict(active_chats[0])
+            conversations.insert(0, {
+                "phone": active_phone,
+                "customer_name": ac.get("customer_name") or active_phone,
+                "content": ac.get("content", ""),
+                "direction": ac.get("direction", "out"),
+                "timestamp": ac.get("timestamp", ""),
+                "message_type": ac.get("message_type", "text"),
+                "unread": 0,
+                "last_inbound_timestamp": ac.get("timestamp") if ac.get("direction") == "in" else None,
+            })
+
     from datetime import datetime, timedelta, timezone
     IST = timezone(timedelta(hours=5, minutes=30))
     now_naive = datetime.now(IST).replace(tzinfo=None)
-    
+
     for c in conversations:
         lit = c.get("last_inbound_timestamp")
         c["window_open"] = False
@@ -2554,8 +2600,15 @@ def api_inbox_conversations():
             except Exception:
                 pass
         c["formatted_time"] = inbox_time_or_date_filter(c.get("timestamp"))
-        
+
     return jsonify(conversations)
+
+
+@app.route("/api/inbox/mark-all-read", methods=["POST"])
+@login_required
+def inbox_mark_all_read():
+    count = db.mark_all_read()
+    return jsonify({"ok": True, "count": count})
 
 
 @app.route("/api/inbox/<phone>/delete", methods=["POST"])

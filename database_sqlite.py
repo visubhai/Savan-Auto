@@ -895,11 +895,15 @@ def get_conversation(phone, limit=100):
         return rows[::-1]
 
 
-def list_conversations(limit=50):
+def list_conversations(limit=50, filter_type=None):
     """One row per phone: latest message, unread count, customer name."""
-    with get_db() as db:
-        return db.execute(
-            """SELECT c.phone, c.customer_name, c.content, c.direction,
+    having_clause = ""
+    if filter_type == "unread":
+        having_clause = "HAVING unread > 0"
+    elif filter_type == "open":
+        having_clause = "HAVING last_inbound_timestamp >= datetime('now', '+330 minutes', '-24 hours')"
+
+    sql = f"""SELECT c.phone, c.customer_name, c.content, c.direction,
                       c.timestamp, c.message_type,
                       SUM(CASE WHEN c.read=0 AND c.direction='in' THEN 1 ELSE 0 END) as unread,
                       (SELECT MAX(timestamp) FROM chats WHERE phone=c.phone AND direction='in') as last_inbound_timestamp
@@ -908,10 +912,11 @@ def list_conversations(limit=50):
                    SELECT phone, MAX(timestamp) as max_ts FROM chats GROUP BY phone
                ) latest ON c.phone = latest.phone AND c.timestamp = latest.max_ts
                GROUP BY c.phone
+               {having_clause}
                ORDER BY c.timestamp DESC
-               LIMIT ?""",
-            (limit,),
-        ).fetchall()
+               LIMIT ?"""
+    with get_db() as db:
+        return db.execute(sql, (limit,)).fetchall()
 
 
 def mark_read(phone):
@@ -919,6 +924,12 @@ def mark_read(phone):
         db.execute(
             "UPDATE chats SET read=1 WHERE phone=? AND direction='in'", (phone,)
         )
+
+
+def mark_all_read():
+    with get_db() as db:
+        cur = db.execute("UPDATE chats SET read=1 WHERE direction='in' AND read=0")
+        return cur.rowcount
 
 
 def delete_conversation(phone):
