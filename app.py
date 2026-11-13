@@ -2607,13 +2607,6 @@ def api_inbox_conversations():
     return jsonify(conversations)
 
 
-@app.route("/api/inbox/mark-all-read", methods=["POST"])
-@login_required
-def inbox_mark_all_read():
-    count = db.mark_all_read()
-    return jsonify({"ok": True, "count": count})
-
-
 @app.route("/api/inbox/<phone>/delete", methods=["POST"])
 @login_required
 def inbox_delete_conversation(phone):
